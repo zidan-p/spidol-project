@@ -1,22 +1,114 @@
-// Main canvas layout (hand-rolled, per SPEC.md 3.3). Kept deliberately
-// minimal for ticket 01: just the WebSocket-driven canvas and a bare
-// connection-status readout. Tool dock / property sidebar / blackout mode /
-// kiosk mode are ticket 02's concern (UI chrome beyond a basic canvas).
+// Main canvas layout (hand-rolled, per SPEC.md 3.3). Ticket 01 built the
+// bare WebSocket-driven canvas; this ticket (03) adds the UI chrome around
+// it: ToolIsland, PropertySidebar, undo/redo, Blackout Mode, Kiosk Mode,
+// and StatusCapsule.
+import { useCallback, useRef, useState } from 'react'
 import { Canvas } from './components/Canvas'
+import { PropertySidebar } from './components/PropertySidebar'
+import { StatusCapsule } from './components/StatusCapsule'
+import { ToolIsland } from './components/ToolIsland'
+import { useBlackoutMode } from './hooks/useBlackoutMode'
+import { useKioskMode } from './hooks/useKioskMode'
 import { useSpidolSocket } from './hooks/useSpidolSocket'
+import { useUndoRedoHotkeys } from './hooks/useUndoRedoHotkeys'
 import './styles/excalidraw.css'
 
 const WEBSOCKET_URL = `ws://${window.location.hostname}:8765`
 
 function App() {
   const { latestTrackRef, connectionState } = useSpidolSocket(WEBSOCKET_URL)
+  const canvasRef = useRef(null)
+
+  const [tool, setTool] = useState('pen')
+  const [color, setColor] = useState('#ffffff')
+  const [width, setWidth] = useState(4)
+  const [dash, setDash] = useState('solid')
+  const style = { tool, color, width, dash }
+
+  const [history, setHistory] = useState({ canUndo: false, canRedo: false })
+  const [pendingText, setPendingText] = useState(null) // { x, y } in normalized 0..1 canvas coords
+  const [isTouching, setIsTouching] = useState(false)
+
+  const { isBlackout } = useBlackoutMode()
+  const { isKiosk, toggleKiosk } = useKioskMode()
+
+  const handleUndo = useCallback(() => canvasRef.current?.undo(), [])
+  const handleRedo = useCallback(() => canvasRef.current?.redo(), [])
+  useUndoRedoHotkeys({ onUndo: handleUndo, onRedo: handleRedo })
+
+  const handleClear = useCallback(() => canvasRef.current?.clear(), [])
+
+  const handleTextPlacement = useCallback((stroke) => {
+    setPendingText({ x: stroke.x, y: stroke.y })
+  }, [])
+
+  const commitPendingText = (text) => {
+    canvasRef.current?.setTextForLastStroke(text)
+    setPendingText(null)
+  }
+
+  // Camera (ticket 02) and the BLE touch provider (ticket 05) don't exist
+  // yet. Touch state is already available today from the TRACK_UPDATE
+  // stream's is_touching field, so that part is wired live; camera stays a
+  // flat "not-wired" placeholder until ticket 02 lands.
+  const camera = { status: 'not-wired' }
+  const touch = {
+    status: connectionState === 'open' ? 'ok' : 'not-wired',
+    isTouching,
+  }
 
   return (
-    <div className="spidol-app">
-      <div className="status-capsule" data-connection-state={connectionState}>
-        WS: {connectionState}
-      </div>
-      <Canvas latestTrackRef={latestTrackRef} />
+    <div className="spidol-app" data-blackout={isBlackout} data-kiosk={isKiosk}>
+      {!isBlackout && (
+        <>
+          <ToolIsland tool={tool} onSelectTool={setTool} />
+          <PropertySidebar
+            color={color}
+            onColorChange={setColor}
+            width={width}
+            onWidthChange={setWidth}
+            dash={dash}
+            onDashChange={setDash}
+          />
+          <StatusCapsule connectionState={connectionState} camera={camera} touch={touch} />
+          <div className="hud hud--bottom-left">
+            <button type="button" onClick={handleUndo} disabled={!history.canUndo}>
+              Undo
+            </button>
+            <button type="button" onClick={handleRedo} disabled={!history.canRedo}>
+              Redo
+            </button>
+            <button type="button" onClick={handleClear}>
+              Clear
+            </button>
+            <button type="button" onClick={toggleKiosk}>
+              {isKiosk ? 'Exit kiosk' : 'Enter kiosk'}
+            </button>
+          </div>
+          {pendingText && (
+            <input
+              type="text"
+              autoFocus
+              className="text-tool-input"
+              style={{ left: `${pendingText.x * 100}%`, top: `${pendingText.y * 100}%` }}
+              onKeyDown={(event) => {
+                if (event.key === 'Enter') commitPendingText(event.currentTarget.value)
+                if (event.key === 'Escape') commitPendingText('')
+              }}
+              onBlur={(event) => commitPendingText(event.currentTarget.value)}
+            />
+          )}
+        </>
+      )}
+      <Canvas
+        ref={canvasRef}
+        latestTrackRef={latestTrackRef}
+        tool={tool}
+        style={style}
+        onHistoryChange={setHistory}
+        onTextPlacement={handleTextPlacement}
+        onTouchChange={setIsTouching}
+      />
     </div>
   )
 }
