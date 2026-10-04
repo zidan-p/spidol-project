@@ -4,7 +4,7 @@
 
 **Blocked by:** None (can start immediately)
 
-**Status:** ready-for-agent
+**Status:** done (merged to integration/spidol-v1 at a95351b)
 
 - [ ] `server/` scaffolded with the `BasePositionTracker`/`BaseTouchProvider` HAL interfaces, a `SystemMouseFallbackTracker` and `KeyboardMockProvider` (or equivalent mouse-click-based touch stub) implementation, and a WebSocket server broadcasting `TRACK_UPDATE` messages at ~60 FPS per the documented contract (`x`, `y`, `is_touching`, `is_detected`, `fps`, `device_id`)
 - [ ] `view/` scaffolded with a hand-rolled canvas (not `@excalidraw/excalidraw`) that connects to the WebSocket and renders a stroke buffer driven purely by incoming `TRACK_UPDATE` messages, not native pointer events directly
