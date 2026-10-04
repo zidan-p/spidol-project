@@ -96,7 +96,7 @@ spidol-project/
 
 ### 3.2 Subproject `./server` (Python Engine & Pluggable Architecture)
 - **Environment:** Isolated Python Virtual Environment (`.venv`) using Python 3.10+.
-- **Key Dependencies:** `opencv-python>=4.8.0`, `websockets>=12.0`, `numpy>=1.24.0`, `google-generativeai`, `bleak` (BLE GATT client).
+- **Key Dependencies:** `opencv-python>=4.8.0`, `websockets>=12.0`, `numpy>=1.24.0`, `google-genai` (current SDK; `google-generativeai` is legacy/deprecated), `bleak` (BLE GATT client).
 
 #### A. Hardware Abstraction Layer (HAL / Open-Closed Architecture)
 ```python
@@ -131,7 +131,7 @@ class BaseTouchProvider(ABC):
 - The **AI Trigger Region** submitted is every stroke drawn since the last AI Trigger or canvas clear, not a fixed time window, so a mid-formula pause never clips it. Submitted strokes remain visible on the canvas afterward.
 - On AI Trigger:
   1. The server extracts a sub-image (ROI) from the camera buffer covering the AI Trigger Region.
-  2. The image is passed to **Gemini 3.5 Flash-Lite** (or newer; `gemini-1.5-flash` is retired as of Sept 2025 and must not be referenced in code) with a structured `response_schema` constraint.
+  2. The image is passed to **Gemini 3.1 Flash-Lite** (or newer — verify against `client.models.list()` at implementation time, as this model family churns every few months; `gemini-1.5-flash` is retired as of Sept 2025 and `gemini-3.5-flash-lite` does not exist, neither must be referenced in code) via the **`google-genai`** SDK (`from google import genai`; the legacy `google-generativeai` package is deprecated) with a structured `response_schema` constraint.
   3. Response payload:
      ```json
      {
