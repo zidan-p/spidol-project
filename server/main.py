@@ -39,6 +39,8 @@ import os
 import threading
 from pathlib import Path
 
+from dotenv import load_dotenv
+
 from ai.gemini_pipeline import make_live_client
 from hal.image_source import BlankCanvasImageSource, CameraImageSource
 from hal.providers import BleTouchProvider, KeyboardMockProvider
@@ -224,6 +226,7 @@ async def run(args: argparse.Namespace) -> None:
 
 
 def main() -> None:
+    load_dotenv()
     args = parse_args()
     try:
         asyncio.run(run(args))

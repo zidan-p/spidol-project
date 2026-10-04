@@ -11,6 +11,7 @@ dependencies = [
     "google-genai>=0.1.0",
     "pydantic>=2.0.0",
     "bleak>=0.22.0",
+    "python-dotenv>=1.0.0",
 ]
 
 [project.optional-dependencies]
