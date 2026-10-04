@@ -1,0 +1,4 @@
+/* Base reset. App-specific styling lives in styles/excalidraw.css. */
+* {
+  box-sizing: border-box;
+}
