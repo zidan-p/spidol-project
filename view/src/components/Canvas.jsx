@@ -24,6 +24,12 @@ export function Canvas({ latestTrackRef }) {
   useEffect(() => {
     const canvas = canvasRef.current
     const ctx = canvas.getContext('2d')
+    // jsdom (used by component tests that render <App/> around this canvas,
+    // e.g. App.test.jsx's AI Trigger wiring tests) doesn't implement
+    // getContext('2d') without the optional `canvas` native package, and
+    // returns null -- guard so those tests can mount the tree without
+    // pulling in that dependency. Real browsers always return a context.
+    if (!ctx) return undefined
     ctx.strokeStyle = '#ffffff'
     ctx.lineWidth = 4
     ctx.lineJoin = 'round'

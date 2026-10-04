@@ -15,6 +15,7 @@ class FakeWebSocket {
     this.onclose = null
     this.onmessage = null
     this.closed = false
+    this.sent = []
     FakeWebSocket.instances.push(this)
   }
 
@@ -24,6 +25,10 @@ class FakeWebSocket {
 
   simulateMessage(data) {
     this.onmessage?.({ data: JSON.stringify(data) })
+  }
+
+  send(data) {
+    this.sent.push(data)
   }
 
   close() {
@@ -87,5 +92,38 @@ describe('useSpidolSocket', () => {
     unmount()
 
     expect(socket.closed).toBe(true)
+  })
+
+  it('appends AI_WIDGET_SPAWN messages to the widgets list', () => {
+    const { result } = renderHook(() => useSpidolSocket('ws://127.0.0.1:8765'))
+    const socket = FakeWebSocket.instances[0]
+
+    const widgetMessage = {
+      type: 'AI_WIDGET_SPAWN',
+      widget_id: 'widget_01',
+      anchor_x: 0.5,
+      anchor_y: 0.3,
+      formula_latex: 'F = -kx',
+      title: 'Spring-Mass Harmonic Oscillation',
+      sim_type: 'spring_mass',
+      parameters: [],
+    }
+
+    act(() => {
+      socket.simulateMessage(widgetMessage)
+    })
+
+    expect(result.current.widgets).toEqual([widgetMessage])
+  })
+
+  it('exposes sendMessage, which sends AI_TRIGGER as JSON over the socket', () => {
+    const { result } = renderHook(() => useSpidolSocket('ws://127.0.0.1:8765'))
+    const socket = FakeWebSocket.instances[0]
+
+    act(() => {
+      result.current.sendMessage({ type: 'AI_TRIGGER' })
+    })
+
+    expect(socket.sent).toEqual([JSON.stringify({ type: 'AI_TRIGGER' })])
   })
 })

@@ -11,11 +11,13 @@ import { useEffect, useRef, useState } from 'react'
 
 export function useSpidolSocket(url) {
   const latestTrackRef = useRef({ x: 0, y: 0, is_touching: false, is_detected: false })
+  const socketRef = useRef(null)
   const [connectionState, setConnectionState] = useState('connecting')
   const [widgets, setWidgets] = useState([])
 
   useEffect(() => {
     const ws = new WebSocket(url)
+    socketRef.current = ws
 
     ws.onopen = () => setConnectionState('open')
     ws.onclose = () => setConnectionState('closed')
@@ -40,5 +42,15 @@ export function useSpidolSocket(url) {
     return () => ws.close()
   }, [url])
 
-  return { latestTrackRef, connectionState, widgets }
+  // Dev-mode AI Trigger hook (ticket 04): any input source can call this to
+  // submit the current AI Trigger Region for analysis -- for this ticket,
+  // the frontend calls it from a keyboard shortcut (see App.jsx), sending
+  // `{"type": "AI_TRIGGER"}` over the same socket the TRACK_UPDATE stream
+  // arrives on. The real Stylus body button (ticket 05) triggers the same
+  // server-side handler without going through this WS message at all.
+  const sendMessage = (message) => {
+    socketRef.current?.send(JSON.stringify(message))
+  }
+
+  return { latestTrackRef, connectionState, widgets, sendMessage }
 }
