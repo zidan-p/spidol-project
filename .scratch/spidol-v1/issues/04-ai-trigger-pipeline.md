@@ -4,14 +4,16 @@
 
 **Blocked by:** 01
 
-**Status:** ready-for-agent
+**Status:** code-complete, Gemini live-call unverified (merged to integration/spidol-v1)
 
-- [ ] An abstracted AI Trigger event hook exists that any input source can call (satisfied in this ticket by a dev-mode mock, e.g. a keyboard shortcut; satisfied later by the real Stylus button in ticket 05)
-- [ ] On AI Trigger, the server computes the AI Trigger Region: all strokes recorded since the previous AI Trigger or the last canvas clear (tracked by stroke timestamp/ID), not a fixed time window
-- [ ] The contour detector provides ROI-selection help (returns the bounding region of the last closed contour, if one exists) but never fires the AI pipeline on its own
-- [ ] The AI Trigger Region is cropped and sent to Gemini 3.1 Flash-Lite (or newer — verify via `client.models.list()` at implementation time; not `gemini-1.5-flash`, retired, and not `gemini-3.5-flash-lite`, which doesn't exist) via the `google-genai` SDK, with a `response_schema` constraining output to `{formula_latex, concept_title, simulation_type, parameters[]}`
-- [ ] `simulation_type` is validated against a fixed enum (3-4 types, e.g. `spring_mass`, `pendulum`, `projectile`); a recognized type broadcasts `AI_WIDGET_SPAWN`, an unrecognized/invalid one broadcasts `AI_WIDGET_UNSUPPORTED`
-- [ ] If the live Gemini call errors or exceeds a ~3s timeout, a Cached Fallback Schema (pre-baked response for the known demo formula) is served instead, after the real call was attempted first
-- [ ] Frontend `SimulationWidget` renders each fixed Simulation Type using its own hand-written RK4 integrator (no general physics library), with sliders bound to the returned `parameters[]` and editable via mouse
-- [ ] Frontend renders a distinct "concept detected but not yet supported" state when `AI_WIDGET_UNSUPPORTED` is received, instead of crashing or silently doing nothing
-- [ ] Submitted strokes remain visible on the canvas after the AI Trigger resolves (formula and simulation appear side by side)
+- [x] An abstracted AI Trigger event hook exists that any input source can call — implemented as a `{"type": "AI_TRIGGER"}` WebSocket message any connected client can send; frontend dev-mode mock is a "T" keydown; ticket 05's real Stylus button will call the same server-side `handle_ai_trigger`
+- [x] On AI Trigger, the server computes the AI Trigger Region: all strokes recorded since the previous AI Trigger or the last canvas clear (tracked by stroke timestamp/ID), not a fixed time window — `StrokeRegionTracker`
+- [x] The contour detector provides ROI-selection help (returns the bounding region of the last closed contour, if one exists) but never fires the AI pipeline on its own
+- [x] The AI Trigger Region is cropped and sent to Gemini 3.1 Flash-Lite via the `google-genai` SDK, with a `response_schema` constraining output to `{formula_latex, concept_title, simulation_type, parameters[]}` — **implemented against the real SDK call shape but only tested against a faked client; no `GEMINI_API_KEY` was available to verify the live call. Re-verify the model string via `client.models.list()` before the demo, since this family churns.**
+- [x] `simulation_type` is validated against a fixed enum (`spring_mass`, `pendulum`, `projectile`); a recognized type broadcasts `AI_WIDGET_SPAWN`, an unrecognized/invalid one broadcasts `AI_WIDGET_UNSUPPORTED`
+- [x] If the live Gemini call errors or exceeds a ~3s timeout, a Cached Fallback Schema (pre-baked spring-mass response) is served instead, after the real call was attempted first
+- [x] Frontend `SimulationWidget` renders each fixed Simulation Type using its own hand-written RK4 integrator (no general physics library), with sliders bound to the returned `parameters[]` and editable via mouse
+- [x] Frontend renders a distinct "concept detected but not yet supported" state when `AI_WIDGET_UNSUPPORTED` is received, instead of crashing or silently doing nothing
+- [x] Submitted strokes remain visible on the canvas after the AI Trigger resolves (formula and simulation appear side by side)
+
+**Known gap carried forward:** the AI pipeline crops a `BlankCanvasImageSource` stub, not a real camera frame — ticket 02's `OpticalColorTracker` doesn't yet feed frames into the AI pipeline's image source. Only the Cached Fallback Schema path demos meaningfully until that's wired up (follow-up work, not written up as a new ticket since it's a small wiring task, not a new vertical slice — see ticket 06).
