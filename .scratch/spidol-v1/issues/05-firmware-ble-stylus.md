@@ -4,7 +4,7 @@
 
 **Blocked by:** 01, 04
 
-**Status:** ready-for-agent
+**Status:** code-complete, hardware-unverified (merged to integration/spidol-v1 at 7e4b9ca)
 
 - [x] ESP32-C3 firmware (NimBLE stack) exposes a custom BLE GATT service with a characteristic that notifies `touching: bool`, driven by the Tip Contact Switch (GPIO4, pull-up, debounced) — no HID mouse profile, no movement deltas, no OS cursor involvement. Written in `spidol/spidol_firmware.ino`, carefully reasoned from SPEC.md/ADR-0001/the NimBLE-Arduino API, but **UNVERIFIED against a real ESP32-C3 or the Arduino toolchain** (no hardware/compiler available in this environment).
 - [x] A second characteristic notifies on AI Trigger button presses (GPIO5), press-edge only, debounced — same caveat as above (firmware unverified on real hardware).
