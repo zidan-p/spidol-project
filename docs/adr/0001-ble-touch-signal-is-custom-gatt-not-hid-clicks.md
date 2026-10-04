@@ -1,0 +1,5 @@
+# Touch Signal travels over a custom BLE GATT characteristic, not HID mouse clicks
+
+The original design had the stylus enumerate as a BLE HID mouse, sending `press(MOUSE_LEFT)`/`release(MOUSE_LEFT)` with zero movement delta to signal the Touch Signal, while position arrived separately over WebSocket from the camera. Research surfaced two compounding problems: zero-movement-delta HID mouse reports are an unverified pattern that some OS Bluetooth stacks reportedly ignore or drop, and because it's a literal system HID device, every press is a real OS-level click wherever the actual cursor sits — not where the pen points — risking stray clicks on anything on screen.
+
+We decided to fire a custom BLE GATT characteristic notification for press/release instead, consumed directly by the Python server's `BleTouchProvider` (e.g. via `bleak`). This removes both failure modes entirely, at the cost of writing a small custom GATT service instead of using the drop-in `BleMouse.h` library and losing the "zero custom host drivers" property claimed in the original spec. Kiosk Mode (fullscreen, `cursor: none`) is kept as defense-in-depth but is no longer load-bearing.
