@@ -140,6 +140,49 @@ def test_out_of_enum_simulation_type_still_parses_successfully():
     assert is_supported_simulation_type(result.simulation_type) is False
 
 
+def test_markdown_fenced_json_still_parses():
+    # Some OpenAI-compatible routers/models wrap json_object output in a
+    # ```json ... ``` code fence despite being asked not to -- observed
+    # against a real local router during manual testing. Must not be
+    # treated as malformed.
+    fenced = "```json\n" + SPRING_MASS_JSON.strip() + "\n```"
+    client = _FakeClient(response_text=fenced)
+
+    result = analyze_formula_crop(b"fake-png-bytes", client, timeout_s=3.0)
+
+    assert isinstance(result, FormulaAnalysis)
+    assert result.simulation_type == "spring_mass"
+
+
+def test_bare_markdown_fence_without_json_label_still_parses():
+    fenced = "```\n" + SPRING_MASS_JSON.strip() + "\n```"
+    client = _FakeClient(response_text=fenced)
+
+    result = analyze_formula_crop(b"fake-png-bytes", client, timeout_s=3.0)
+
+    assert isinstance(result, FormulaAnalysis)
+
+
+def test_requests_json_object_mode_not_strict_json_schema():
+    # json_schema strict mode is not reliably honored by all OpenAI-
+    # compatible routers (observed: one silently ignored it and returned
+    # prose) -- json_object is the broadly-compatible choice instead.
+    seen = {}
+
+    class _RecordingCompletions:
+        def create(self, *, model, messages, response_format):
+            seen["response_format"] = response_format
+            return _FakeResponse(SPRING_MASS_JSON)
+
+    class _RecordingClient:
+        def __init__(self):
+            self.chat = type("Chat", (), {"completions": _RecordingCompletions()})()
+
+    analyze_formula_crop(b"fake-png-bytes", _RecordingClient(), timeout_s=3.0)
+
+    assert seen["response_format"] == {"type": "json_object"}
+
+
 def test_passes_requested_model_through_to_the_client():
     seen = {}
 

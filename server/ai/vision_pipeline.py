@@ -2,11 +2,21 @@
 3.2.D, `ai/vision_pipeline.py`).
 
 Provider-agnostic by design: talks to any OpenAI-compatible chat-completions
-endpoint (`client.chat.completions.create(...)`, structured output via
-`response_format={"type": "json_schema", ...}`), not a provider-specific SDK.
-This is what lets the same code point at Gemini's own OpenAI-compatible
-endpoint, OpenRouter, or any other OpenAI-compatible router/provider -- only
-`base_url`/`api_key`/`model` change, never this module.
+endpoint (`client.chat.completions.create(...)`), not a provider-specific
+SDK. This is what lets the same code point at Gemini's own OpenAI-compatible
+endpoint, OpenRouter, a local router/proxy, or any other OpenAI-compatible
+provider -- only `base_url`/`api_key`/`model` change, never this module.
+
+Structured output uses the loose `response_format={"type": "json_object"}`
+mode, not `{"type": "json_schema", ...}` -- deliberately. Strict json_schema
+mode is not reliably honored across OpenAI-compatible routers/proxies in
+practice (observed: a local router silently ignored it and returned prose
+instead of JSON); `json_object` mode is far more broadly supported, at the
+cost of only guaranteeing valid JSON syntax, not the specific field shape --
+so `PROMPT_TEXT` spells out the exact required JSON shape in the prompt
+itself, and `_strip_markdown_fence` below handles the common case of a model
+wrapping its JSON in a ```json ... ``` code fence despite being asked not to
+(also observed against the same router).
 
 Default endpoint/model (used when no override is configured): Gemini's
 OpenAI-compatible endpoint (`DEFAULT_BASE_URL`) with `DEFAULT_MODEL`. Per the
@@ -14,12 +24,13 @@ implementation research notes (section 5), the real current Flash-Lite model
 as of this writing is `gemini-3.1-flash-lite`, not `gemini-1.5-flash`
 (retired) and not `gemini-3.5-flash-lite` (doesn't exist) -- re-verify at
 deploy time if this drifts again, the model family churns every few months.
-To route through OpenRouter or another OpenAI-compatible provider instead,
-override `base_url`/`model` (see `main.py`'s `AI_BASE_URL`/`AI_MODEL` env
-vars) and set the matching API key.
+To route through OpenRouter, a local router, or another OpenAI-compatible
+provider instead, override `base_url`/`model` (see `main.py`'s
+`AI_BASE_URL`/`AI_MODEL` env vars) and set the matching API key.
 """
 import base64
 import logging
+import re
 from concurrent.futures import ThreadPoolExecutor, TimeoutError as FutureTimeoutError
 from enum import Enum
 
@@ -31,13 +42,30 @@ DEFAULT_BASE_URL = "https://generativelanguage.googleapis.com/v1beta/openai/"
 DEFAULT_MODEL = "gemini-3.1-flash-lite"
 DEFAULT_TIMEOUT_S = 3.0
 
+_MARKDOWN_FENCE_RE = re.compile(r"^```(?:json)?\s*(.*?)\s*```$", re.DOTALL)
+
 PROMPT_TEXT = (
     "Extract the handwritten physics/math formula in this image. "
     "Classify it as one of: spring_mass, pendulum, projectile -- or, if it "
     "doesn't match any of those, your best short snake_case label for the "
     "concept. Return its LaTeX, a short concept title, and reasonable "
-    "adjustable parameters with min/max/default values."
+    "adjustable parameters with min/max/default values.\n\n"
+    "Respond with ONLY a single JSON object (no prose, no markdown code "
+    "fence), matching exactly this shape:\n"
+    '{"formula_latex": "<latex string>", "concept_title": "<short title>", '
+    '"simulation_type": "<snake_case label>", '
+    '"parameters": [{"key": "<param key>", "label": "<display label>", '
+    '"min": <number>, "max": <number>, "val": <number>}, ...]}'
 )
+
+
+def _strip_markdown_fence(content: str) -> str:
+    """Strips a ```json ... ``` (or bare ``` ... ```) wrapper some models
+    add around JSON output despite being asked not to -- a no-op if `content`
+    isn't fenced.
+    """
+    match = _MARKDOWN_FENCE_RE.match(content.strip())
+    return match.group(1) if match else content
 
 
 class SimulationType(str, Enum):
@@ -121,17 +149,10 @@ def _call_model(client, image_bytes: bytes, model: str) -> FormulaAnalysis:
                 ],
             }
         ],
-        response_format={
-            "type": "json_schema",
-            "json_schema": {
-                "name": "FormulaAnalysis",
-                "schema": FormulaAnalysis.model_json_schema(),
-                "strict": True,
-            },
-        },
+        response_format={"type": "json_object"},
     )
     content = response.choices[0].message.content
-    return FormulaAnalysis.model_validate_json(content)
+    return FormulaAnalysis.model_validate_json(_strip_markdown_fence(content))
 
 
 def analyze_formula_crop(
