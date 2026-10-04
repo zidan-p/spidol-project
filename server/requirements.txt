@@ -1,5 +1,6 @@
 websockets>=12.0
 numpy>=1.24.0
 pynput>=1.7.6
+opencv-python>=4.8.0
 pytest>=8.0.0
 pytest-asyncio>=0.23.0
