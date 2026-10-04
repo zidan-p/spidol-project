@@ -48,3 +48,129 @@ body,
 .status-capsule[data-connection-state='closed'] {
   color: #f87171;
 }
+
+.status-capsule {
+  display: flex;
+  gap: 10px;
+}
+
+.status-capsule__field[data-state='closed'],
+.status-capsule__field[data-state='not-wired'] {
+  color: #f87171;
+}
+
+.status-capsule__field[data-state='open'],
+.status-capsule__field[data-state='ok'] {
+  color: #4ade80;
+}
+
+/* Kiosk Mode (GLOSSARY.md): real OS cursor hidden everywhere in the app
+   shell while fullscreen -- distinct from Blackout Mode below. */
+.spidol-app[data-kiosk='true'],
+.spidol-app[data-kiosk='true'] * {
+  cursor: none !important;
+}
+
+/* Blackout Mode (hotkey F, GLOSSARY.md): pure #000000 background, all UI
+   chrome hidden by App.jsx (not rendered at all, not just visually hidden,
+   so it's also not focusable/clickable while blacked out). */
+.spidol-app[data-blackout='true'] .spidol-canvas {
+  background: #000000;
+}
+
+.tool-island {
+  position: absolute;
+  top: 12px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 10;
+  display: flex;
+  gap: 4px;
+  padding: 6px;
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.tool-island__button {
+  padding: 6px 10px;
+  border-radius: 8px;
+  border: none;
+  background: transparent;
+  color: #e5e7eb;
+  cursor: pointer;
+}
+
+.tool-island__button[aria-pressed='true'] {
+  background: rgba(255, 255, 255, 0.2);
+}
+
+.property-sidebar {
+  position: absolute;
+  top: 70px;
+  left: 12px;
+  z-index: 10;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 10px;
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.property-sidebar fieldset {
+  border: none;
+  display: flex;
+  gap: 6px;
+  padding: 0;
+  margin: 0;
+}
+
+.property-sidebar legend {
+  color: #9ca3af;
+  font: 11px ui-monospace, Consolas, monospace;
+}
+
+.property-sidebar__swatch {
+  width: 20px;
+  height: 20px;
+  border-radius: 999px;
+  border: 2px solid transparent;
+  cursor: pointer;
+}
+
+.property-sidebar__swatch[aria-checked='true'] {
+  border-color: #ffffff;
+}
+
+.hud {
+  position: absolute;
+  bottom: 12px;
+  left: 12px;
+  z-index: 10;
+  display: flex;
+  gap: 6px;
+}
+
+.hud button {
+  padding: 6px 10px;
+  border-radius: 8px;
+  border: none;
+  background: rgba(255, 255, 255, 0.08);
+  color: #e5e7eb;
+  cursor: pointer;
+}
+
+.hud button:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+.text-tool-input {
+  position: absolute;
+  z-index: 10;
+  transform: translate(0, -4px);
+  background: transparent;
+  border: 1px dashed #9ca3af;
+  color: #ffffff;
+  font: 16px sans-serif;
+}
