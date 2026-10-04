@@ -1,10 +1,13 @@
 """Position-tracker drivers.
 
-v1 ships `SystemMouseFallbackTracker` only. `OpticalColorTracker` (camera/
-color-blob based) is a later ticket's concern and slots in here as a sibling
-class implementing the same `BasePositionTracker` ABC.
+v1 ships `SystemMouseFallbackTracker` and `OpticalColorTracker`, both
+implementing the same `BasePositionTracker` ABC (Open-Closed Principle: the
+telemetry loop depends only on the ABC, never on either concrete class).
 """
 from typing import Callable
+
+import cv2
+import numpy as np
 
 from hal.interfaces import BasePositionTracker
 
@@ -58,3 +61,60 @@ class SystemMouseFallbackTracker(BasePositionTracker):
 
 def _clamp(value: float, low: float, high: float) -> float:
     return max(low, min(high, value))
+
+
+class OpticalColorTracker(BasePositionTracker):
+    """Locates the Pen Tip in a camera frame by HSV color/blob detection.
+
+    GLOSSARY: `OpticalColorTracker` is the only position-tracking driver
+    shipping in v1 (`ArucoMarkerTracker` is out of scope). It thresholds the
+    frame to a configurable HSV range, finds the largest matching contour,
+    and reports its centroid as the Pen Tip position. The default range is
+    tuned for a bright green tip; pass `hsv_lower`/`hsv_upper` for a
+    different Pen Tip color.
+
+    Coordinates returned are normalized to the camera frame's own [0, 1]
+    space -- mapping that into canvas space for an angled camera is the
+    homography module's job (`vision/homography.py`), not this class's.
+    """
+
+    DEFAULT_HSV_LOWER = (35, 80, 80)
+    DEFAULT_HSV_UPPER = (85, 255, 255)
+
+    def __init__(
+        self,
+        hsv_lower: tuple[int, int, int] | None = None,
+        hsv_upper: tuple[int, int, int] | None = None,
+        min_contour_area: float = 20.0,
+    ):
+        self._hsv_lower = np.array(hsv_lower or self.DEFAULT_HSV_LOWER, dtype=np.uint8)
+        self._hsv_upper = np.array(hsv_upper or self.DEFAULT_HSV_UPPER, dtype=np.uint8)
+        self._min_contour_area = min_contour_area
+
+    def get_position(self, frame: np.ndarray | None) -> tuple[float, float, bool]:
+        if frame is None or frame.size == 0:
+            return 0.0, 0.0, False
+
+        height, width = frame.shape[:2]
+        hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
+        mask = cv2.inRange(hsv, self._hsv_lower, self._hsv_upper)
+        contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+
+        if not contours:
+            return 0.0, 0.0, False
+
+        largest = max(contours, key=cv2.contourArea)
+        if cv2.contourArea(largest) < self._min_contour_area:
+            return 0.0, 0.0, False
+
+        moments = cv2.moments(largest)
+        if moments["m00"] == 0:
+            return 0.0, 0.0, False
+
+        centroid_x = moments["m10"] / moments["m00"]
+        centroid_y = moments["m01"] / moments["m00"]
+
+        x = _clamp(centroid_x / width, 0.0, 1.0)
+        y = _clamp(centroid_y / height, 0.0, 1.0)
+
+        return x, y, True
