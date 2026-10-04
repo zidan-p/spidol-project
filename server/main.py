@@ -7,12 +7,19 @@ static file host for the compiled `view/dist` bundle.
                              HTTP static server for view/dist (:5000),
                              together behind one command.
 
-v1 uses the mouse as the input source end-to-end (ticket 01): position comes
-from `SystemMouseFallbackTracker`, and the Touch Signal stand-in comes from
-the left mouse button via `KeyboardMockProvider`, bridged by a pynput click
-listener. `OpticalColorTracker` (position) is still a later ticket's
-concern; `BleTouchProvider` (ticket 05, the real Stylus over BLE) is wired
-here behind `--ble-address` without changing anything below the HAL seam.
+v1 defaults to the mouse as the input source end-to-end (ticket 01): position
+comes from `SystemMouseFallbackTracker`, and the Touch Signal stand-in comes
+from the left mouse button via `KeyboardMockProvider`, bridged by a pynput
+click listener. `OpticalColorTracker` (ticket 02, real camera-based position
+tracking) is wired in behind `--tracker=optical-color`: it selects a real
+`CameraImageSource` (instead of `BlankCanvasImageSource`) plus a
+`HomographyCalibrator` and `TrackingLossBridge`, all passed into
+`server_app.create_server`, which feeds a real captured frame into the
+tracker every telemetry tick and applies homography + tracking-loss bridging
+to its output before broadcasting -- see `make_camera_resources` below and
+`server_app.py`'s module docstring for the telemetry-loop wiring itself.
+`BleTouchProvider` (ticket 05, the real Stylus over BLE) is wired here behind
+`--ble-address` without changing anything below the HAL seam.
 
 BLE mode (`--ble-address <mac-or-uuid>`): `make_touch_provider` returns a
 `BleTouchProvider` instead of `KeyboardMockProvider`, the pynput mouse
@@ -33,9 +40,12 @@ import threading
 from pathlib import Path
 
 from ai.gemini_pipeline import make_live_client
+from hal.image_source import BlankCanvasImageSource, CameraImageSource
 from hal.providers import BleTouchProvider, KeyboardMockProvider
-from hal.trackers import SystemMouseFallbackTracker
+from hal.trackers import OpticalColorTracker, SystemMouseFallbackTracker
 from server_app import create_server
+from vision.homography import HomographyCalibrator
+from vision.tracking_loss import TrackingLossBridge
 
 WEBSOCKET_HOST = "127.0.0.1"
 WEBSOCKET_PORT = 8765
@@ -54,6 +64,25 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         "--dev",
         action="store_true",
         help="Dev mode: WebSocket server only; serve the frontend via `pnpm run dev` instead.",
+    )
+    parser.add_argument(
+        "--tracker",
+        choices=["mouse", "optical-color"],
+        default="mouse",
+        help=(
+            "Position-tracking driver: 'mouse' (default) uses "
+            "SystemMouseFallbackTracker; 'optical-color' uses OpticalColorTracker "
+            "against a real camera frame (via CameraImageSource), with "
+            "HomographyCalibrator and TrackingLossBridge wired into the telemetry "
+            "loop. Analogous to --ble-address for the touch-signal side."
+        ),
+    )
+    parser.add_argument(
+        "--camera-index",
+        type=int,
+        default=0,
+        help="OpenCV camera index to open when --tracker=optical-color (RemoteCam "
+        "exposes itself as a standard UVC webcam, see docs/adr/0003).",
     )
     parser.add_argument(
         "--ble-address",
@@ -84,6 +113,16 @@ def make_touch_provider(args: argparse.Namespace):
     return KeyboardMockProvider()
 
 
+def make_tracker(args: argparse.Namespace):
+    """Picks the position-tracking driver: `OpticalColorTracker` if
+    `--tracker=optical-color` was given, else the v1 mouse fallback. Mirrors
+    `make_touch_provider`'s `--ble-address` selection pattern above.
+    """
+    if args.tracker == "optical-color":
+        return OpticalColorTracker()
+    return SystemMouseFallbackTracker()
+
+
 def make_click_handler(touch_provider: KeyboardMockProvider):
     """Bridges left-mouse-button state to the touch provider.
 
@@ -108,6 +147,25 @@ def start_static_server(directory: Path, host: str, port: int) -> threading.Thre
     return thread
 
 
+def make_camera_resources(args: argparse.Namespace, capture_factory=None):
+    """Builds the camera-dependent trio -- image source, homography
+    calibrator, tracking-loss bridge -- for `--tracker=optical-color`, or the
+    v1 mouse-mode defaults (blank image source, no homography/loss bridge)
+    otherwise. Mirrors `make_touch_provider`'s `--ble-address` branch.
+
+    `capture_factory` is forwarded to `CameraImageSource` purely so tests can
+    avoid opening a real camera device (see hal/image_source.py).
+    """
+    if args.tracker != "optical-color":
+        return BlankCanvasImageSource(), None, None
+
+    kwargs = {} if capture_factory is None else {"capture_factory": capture_factory}
+    image_source = CameraImageSource(camera_index=args.camera_index, **kwargs)
+    homography = HomographyCalibrator()
+    loss_bridge = TrackingLossBridge()
+    return image_source, homography, loss_bridge
+
+
 def make_gemini_client():
     """Constructs the live Gemini client if GEMINI_API_KEY is configured,
     else returns None -- every AI Trigger then serves the Cached Fallback
@@ -122,9 +180,10 @@ def make_gemini_client():
 
 
 async def run(args: argparse.Namespace) -> None:
-    tracker = SystemMouseFallbackTracker()
+    tracker = make_tracker(args)
     touch_provider = make_touch_provider(args)
     gemini_client = make_gemini_client()
+    image_source, homography, loss_bridge = make_camera_resources(args)
 
     if isinstance(touch_provider, KeyboardMockProvider):
         from pynput.mouse import Listener
@@ -148,6 +207,9 @@ async def run(args: argparse.Namespace) -> None:
         host=WEBSOCKET_HOST,
         port=WEBSOCKET_PORT,
         gemini_client=gemini_client,
+        image_source=image_source,
+        homography=homography,
+        loss_bridge=loss_bridge,
     ) as server:
         if isinstance(touch_provider, BleTouchProvider):
             # Wire the real AI Trigger button straight into the server's

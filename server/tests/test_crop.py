@@ -4,6 +4,7 @@ encoding the crop for the Gemini call.
 import numpy as np
 
 from ai.crop import crop_region_from_frame, encode_png
+from ai.stroke_region import Region
 
 
 def test_crop_with_no_region_returns_whole_frame():
@@ -16,7 +17,7 @@ def test_crop_with_no_region_returns_whole_frame():
 
 def test_crop_extracts_normalized_bbox_in_pixel_space():
     frame = np.zeros((100, 200, 3), dtype=np.uint8)
-    region = {"min_x": 0.25, "max_x": 0.5, "min_y": 0.2, "max_y": 0.6, "stroke_ids": [1]}
+    region = Region(min_x=0.25, max_x=0.5, min_y=0.2, max_y=0.6, stroke_ids=(1,))
 
     crop = crop_region_from_frame(frame, region)
 
@@ -28,7 +29,7 @@ def test_crop_extracts_normalized_bbox_in_pixel_space():
 
 def test_crop_clamps_to_frame_bounds_near_edges():
     frame = np.zeros((100, 100, 3), dtype=np.uint8)
-    region = {"min_x": 0.0, "max_x": 0.02, "min_y": 0.0, "max_y": 0.02, "stroke_ids": [1]}
+    region = Region(min_x=0.0, max_x=0.02, min_y=0.0, max_y=0.02, stroke_ids=(1,))
 
     crop = crop_region_from_frame(frame, region)
 

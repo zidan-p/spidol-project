@@ -2,17 +2,15 @@
 `BaseTouchProvider` in `hal/interfaces.py`).
 
 Documented stub decision (ticket 04): ticket 02 (real `OpticalColorTracker` +
-camera capture) isn't built yet, so there is no real camera image to crop
-for the AI Trigger pipeline. Rather than block this ticket on that one,
-`BlankCanvasImageSource` stands in, returning a fixed blank (white) frame.
-The AI trigger pipeline (`ai/trigger.py`) is written against the
-`BaseImageSource` ABC, exactly like the existing tracker/touch-provider
-seams, so ticket 02 supplies a real camera-backed implementation later as a
-one-line swap in `main.py` -- no change to the trigger pipeline itself. The
-tradeoff this accepts: Gemini will "see" a blank crop until ticket 02 lands,
-so the live call will not usefully transcribe a real formula until then;
-the Cached Fallback Schema path is what actually demos correctly until a
-real camera source exists (see also ai/gemini_pipeline.py).
+camera capture) wasn't built yet at the time, so there was no real camera
+image to crop for the AI Trigger pipeline. `BlankCanvasImageSource` stood in,
+returning a fixed blank (white) frame, and remains the default / mouse-dev-mode
+fallback. `CameraImageSource` below is ticket 02's real camera-backed
+implementation, wired in `main.py` as the one-line swap this docstring always
+anticipated -- when `--tracker=optical-color` is selected, `main.py` passes a
+`CameraImageSource` instead, so both the telemetry loop's tracker input and
+the AI Trigger crop see a real frame. No change to the trigger pipeline
+itself was needed; it was already written against `BaseImageSource`.
 """
 from abc import ABC, abstractmethod
 
@@ -39,3 +37,44 @@ class BlankCanvasImageSource(BaseImageSource):
 
     def capture_frame(self) -> np.ndarray:
         return np.full((self._height, self._width, 3), 255, dtype=np.uint8)
+
+
+class CameraImageSource(BaseImageSource):
+    """Real-camera `BaseImageSource` (ticket 02): wraps a video capture
+    device -- RemoteCam (docs/adr/0003) exposes itself as a standard UVC
+    webcam over USB, so a plain `cv2.VideoCapture(camera_index)` is the real
+    capture seam, no RemoteCam-specific client needed.
+
+    `capture_factory` defaults to `cv2.VideoCapture` but is a constructor
+    parameter precisely so tests can inject a fake capture object (no real
+    camera/RemoteCam hardware needed), mirroring `BleTouchProvider`'s
+    `client_factory` seam in `hal/providers.py`.
+    """
+
+    def __init__(
+        self,
+        camera_index: int = 0,
+        width: int = 1280,
+        height: int = 720,
+        capture_factory=None,
+    ):
+        if capture_factory is None:
+            import cv2
+
+            capture_factory = cv2.VideoCapture
+
+        self._width = width
+        self._height = height
+        self._capture = capture_factory(camera_index)
+
+    def capture_frame(self) -> np.ndarray:
+        ok, frame = self._capture.read()
+        if not ok or frame is None:
+            # Camera hiccup (disconnected RemoteCam link, USB hiccup, etc.) --
+            # fall back to a blank frame rather than raising, so one dropped
+            # frame doesn't crash the telemetry loop or an AI Trigger crop.
+            return np.full((self._height, self._width, 3), 255, dtype=np.uint8)
+        return frame
+
+    def release(self) -> None:
+        self._capture.release()

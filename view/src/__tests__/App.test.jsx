@@ -68,6 +68,24 @@ describe('App AI Trigger dev-mode hook', () => {
     expect(screen.getByText('Spring-Mass Harmonic Oscillation')).toBeInTheDocument()
   })
 
+  it('sends a CANVAS_CLEAR message when the Clear button is pressed', () => {
+    render(<App />)
+    const socket = FakeWebSocket.instances[0]
+
+    fireEvent.click(screen.getByRole('button', { name: 'Clear' }))
+
+    expect(socket.sent).toContainEqual(JSON.stringify({ type: 'CANVAS_CLEAR' }))
+  })
+
+  it('sends a CALIBRATE message when the Calibration Hotkey (C) is pressed', () => {
+    render(<App />)
+    const socket = FakeWebSocket.instances[0]
+
+    fireEvent.keyDown(window, { key: 'c' })
+
+    expect(socket.sent).toContainEqual(JSON.stringify({ type: 'CALIBRATE' }))
+  })
+
   it('renders the unsupported state when AI_WIDGET_UNSUPPORTED arrives', () => {
     render(<App />)
     const socket = FakeWebSocket.instances[0]

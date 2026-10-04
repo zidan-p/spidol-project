@@ -10,6 +10,14 @@
 // server-side handler; this is the dev-mode stand-in for that button), and
 // spawned/unsupported widgets render alongside the canvas so the formula
 // and its simulation appear side by side.
+//
+// Ticket 02 adds the Calibration Hotkey: pressing "C" sends {"type":
+// "CALIBRATE"} over the same WebSocket, which server_app.py's handler uses
+// to call HomographyCalibrator.recalibrate(...) (dev-mode stub: no real
+// 4-corner point-picking UX yet, see server_app.py's docstring). The Clear
+// button additionally sends {"type": "CANVAS_CLEAR"} so the server-side AI
+// Trigger Region (StrokeRegionTracker) resets in lockstep with the local
+// canvas clear.
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { Canvas } from './components/Canvas'
 import { PropertySidebar } from './components/PropertySidebar'
@@ -24,6 +32,7 @@ import './styles/excalidraw.css'
 
 const WEBSOCKET_URL = `ws://${window.location.hostname}:8765`
 const AI_TRIGGER_KEY = 't'
+const CALIBRATE_KEY = 'c'
 
 function App() {
   const { latestTrackRef, connectionState, widgets, sendMessage } = useSpidolSocket(WEBSOCKET_URL)
@@ -46,7 +55,14 @@ function App() {
   const handleRedo = useCallback(() => canvasRef.current?.redo(), [])
   useUndoRedoHotkeys({ onUndo: handleUndo, onRedo: handleRedo })
 
-  const handleClear = useCallback(() => canvasRef.current?.clear(), [])
+  const handleClear = useCallback(() => {
+    canvasRef.current?.clear()
+    // Also resets the server-side AI Trigger Region (StrokeRegionTracker),
+    // matching the existing AI_TRIGGER message-handling pattern below --
+    // otherwise a cleared canvas could still have "old" strokes folded into
+    // the next AI Trigger Region server-side.
+    sendMessage({ type: 'CANVAS_CLEAR' })
+  }, [sendMessage])
 
   const handleTextPlacement = useCallback((stroke) => {
     setPendingText({ x: stroke.x, y: stroke.y })
@@ -59,8 +75,17 @@ function App() {
 
   useEffect(() => {
     const onKeyDown = (event) => {
-      if (event.key.toLowerCase() === AI_TRIGGER_KEY) {
+      const key = event.key.toLowerCase()
+      if (key === AI_TRIGGER_KEY) {
         sendMessage({ type: 'AI_TRIGGER' })
+      } else if (key === CALIBRATE_KEY) {
+        // Calibration Hotkey (GLOSSARY.md): manual, operator-triggered
+        // re-run of the 4-point homography calibration -- never automatic
+        // drift detection. Dev-mode stub: no real 4-corner point-picking UX
+        // yet, so this just asks the server to recalibrate against its own
+        // fixed/last-known correspondence (see server_app.py); a real
+        // point-picking UI can later send src_points/dst_points here.
+        sendMessage({ type: 'CALIBRATE' })
       }
     }
     window.addEventListener('keydown', onKeyDown)

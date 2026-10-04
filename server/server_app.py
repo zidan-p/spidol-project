@@ -39,6 +39,33 @@ x/y/is_touching/is_detected values the telemetry loop already computes each
 tick -- rather than trusting the frontend to report the region in the
 trigger message. See `ai/stroke_region.py`'s docstring for the full
 reasoning.
+
+Camera-tracker wiring (ticket 02, closing a known gap): when `main.py`
+selects `--tracker=optical-color`, it passes a real `image_source` (a
+`CameraImageSource`), a `homography` (`HomographyCalibrator`), and a
+`loss_bridge` (`TrackingLossBridge`) into `create_server`. The telemetry loop
+below always captures a frame from `image_source` and hands it to
+`tracker.get_position(frame=...)` -- harmless for `SystemMouseFallbackTracker`,
+which ignores the frame, and exactly the "one-line swap" `hal/image_source.py`
+always documented for a real camera tracker. `homography` and `loss_bridge`
+default to `None`, in which case tracker output is broadcast exactly as
+before (mouse/dev-mode path, unchanged).
+
+Calibration Hotkey mechanism (ticket 02, closing a known gap): `{"type":
+"CALIBRATE"}` is a second WS message any client can send (same "abstracted
+hook" shape as `AI_TRIGGER`). The frontend's dev-mode stand-in is a keyboard
+shortcut ("C", see `view/src/App.jsx`) with no real 4-corner point-picking UX
+yet -- this is a documented dev-mode stub, not a finished calibration flow --
+so the handler recalibrates against a fixed identity correspondence
+(`DEFAULT_CALIBRATION_POINTS`) unless the message itself carries
+`src_points`/`dst_points`, which a future real point-picking UI can supply
+without any server-side change. If no `homography` was constructed (mouse
+mode), this message is a no-op.
+
+Canvas Clear wiring (closing a known gap): `{"type": "CANVAS_CLEAR"}` calls
+`stroke_tracker.clear()` so a frontend Clear also resets the server-side AI
+Trigger Region, matching `ai/stroke_region.py`'s documented `clear()` contract
+-- previously nothing called it from the live server.
 """
 import asyncio
 import functools
@@ -53,8 +80,15 @@ from ai.trigger import handle_ai_trigger
 from hal.image_source import BaseImageSource, BlankCanvasImageSource
 from hal.interfaces import BasePositionTracker, BaseTouchProvider
 from telemetry import build_track_update
+from vision.homography import HomographyCalibrator
+from vision.tracking_loss import TrackedSample, TrackingLossBridge
 
 DEVICE_ID = "spidol_main"
+
+# Dev-mode Calibration Hotkey stub (see module docstring): an identity
+# correspondence, used only when a CALIBRATE message supplies no explicit
+# points. A real 4-corner point-picking UI can override this per-message.
+DEFAULT_CALIBRATION_POINTS = [(0.0, 0.0), (1.0, 0.0), (1.0, 1.0), (0.0, 1.0)]
 
 
 async def _fire_ai_trigger(server_box: dict, stroke_tracker, image_source, gemini_client, ai_timeout_s):
@@ -77,27 +111,45 @@ async def _fire_ai_trigger(server_box: dict, stroke_tracker, image_source, gemin
     broadcast(server_box["server"].connections, widget_message)
 
 
-def _make_handler(server_box: dict, stroke_tracker, image_source, gemini_client, ai_timeout_s):
+def _make_handler(
+    server_box: dict, stroke_tracker, image_source, gemini_client, ai_timeout_s, homography=None
+):
     async def handler(websocket):
         # TRACK_UPDATE is a pure broadcast stream requiring no per-client
-        # request/response behavior; the one message type a client sends
-        # *to* the server is the dev-mode AI_TRIGGER hook below.
+        # request/response behavior; the message types a client sends *to*
+        # the server are the dev-mode AI_TRIGGER, CALIBRATE, and CANVAS_CLEAR
+        # hooks below.
         async for raw in websocket:
             try:
                 message = json.loads(raw)
             except json.JSONDecodeError:
                 continue
 
-            if message.get("type") == "AI_TRIGGER":
+            message_type = message.get("type")
+
+            if message_type == "AI_TRIGGER":
                 await _fire_ai_trigger(
                     server_box, stroke_tracker, image_source, gemini_client, ai_timeout_s
                 )
+            elif message_type == "CANVAS_CLEAR":
+                stroke_tracker.clear()
+            elif message_type == "CALIBRATE" and homography is not None:
+                src_points = message.get("src_points") or DEFAULT_CALIBRATION_POINTS
+                dst_points = message.get("dst_points") or DEFAULT_CALIBRATION_POINTS
+                homography.recalibrate(src_points, dst_points)
 
     return handler
 
 
 async def _telemetry_loop(
-    server, tracker: BasePositionTracker, touch_provider: BaseTouchProvider, stroke_tracker, fps: int
+    server,
+    tracker: BasePositionTracker,
+    touch_provider: BaseTouchProvider,
+    stroke_tracker,
+    fps: int,
+    image_source: BaseImageSource,
+    homography: HomographyCalibrator | None = None,
+    loss_bridge: TrackingLossBridge | None = None,
 ):
     frame_interval = 1 / fps
     last = time.monotonic()
@@ -106,20 +158,35 @@ async def _telemetry_loop(
         instantaneous_fps = 1 / (now - last) if now > last else 0.0
         last = now
 
-        x, y, is_detected = tracker.get_position(frame=None)
+        frame = image_source.capture_frame()
+        raw_x, raw_y, is_detected = tracker.get_position(frame=frame)
         is_touching = touch_provider.is_touching()
 
-        stroke_tracker.ingest(x=x, y=y, is_touching=is_touching, is_detected=is_detected)
+        if homography is not None and homography.is_calibrated and is_detected:
+            raw_x, raw_y = homography.transform((raw_x, raw_y))
 
-        message = build_track_update(
-            device_id=DEVICE_ID,
-            x=x,
-            y=y,
-            is_touching=is_touching,
-            is_detected=is_detected,
-            fps=round(instantaneous_fps, 1),
-        )
-        broadcast(server.connections, message)
+        if loss_bridge is not None:
+            resolved = loss_bridge.push(
+                TrackedSample(timestamp=now, x=raw_x, y=raw_y, is_detected=is_detected)
+            )
+        else:
+            resolved = [TrackedSample(timestamp=now, x=raw_x, y=raw_y, is_detected=is_detected)]
+
+        for sample in resolved:
+            stroke_tracker.ingest(
+                x=sample.x, y=sample.y, is_touching=is_touching, is_detected=sample.is_detected
+            )
+
+            message = build_track_update(
+                device_id=DEVICE_ID,
+                x=sample.x,
+                y=sample.y,
+                is_touching=is_touching,
+                is_detected=sample.is_detected,
+                fps=round(instantaneous_fps, 1),
+            )
+            broadcast(server.connections, message)
+
         await asyncio.sleep(frame_interval)
 
 
@@ -134,6 +201,8 @@ async def create_server(
     image_source: BaseImageSource | None = None,
     gemini_client=None,
     ai_timeout_s: float = 3.0,
+    homography: HomographyCalibrator | None = None,
+    loss_bridge: TrackingLossBridge | None = None,
 ):
     """Starts the WebSocket server, its telemetry broadcast loop, and the AI
     Trigger hook together.
@@ -157,7 +226,9 @@ async def create_server(
     image_source = image_source or BlankCanvasImageSource()
 
     server_box: dict = {}
-    handler = _make_handler(server_box, stroke_tracker, image_source, gemini_client, ai_timeout_s)
+    handler = _make_handler(
+        server_box, stroke_tracker, image_source, gemini_client, ai_timeout_s, homography=homography
+    )
 
     async with serve(handler, host, port) as server:
         server_box["server"] = server
@@ -165,7 +236,16 @@ async def create_server(
             _fire_ai_trigger, server_box, stroke_tracker, image_source, gemini_client, ai_timeout_s
         )
         loop_task = asyncio.create_task(
-            _telemetry_loop(server, tracker, touch_provider, stroke_tracker, fps)
+            _telemetry_loop(
+                server,
+                tracker,
+                touch_provider,
+                stroke_tracker,
+                fps,
+                image_source,
+                homography=homography,
+                loss_bridge=loss_bridge,
+            )
         )
         try:
             yield server

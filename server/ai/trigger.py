@@ -47,8 +47,8 @@ def handle_ai_trigger(
 
     widget_id = f"widget_{next(_widget_id_counter):02d}"
     if region is not None:
-        anchor_x = region["max_x"]
-        anchor_y = region["min_y"]
+        anchor_x = region.max_x
+        anchor_y = region.min_y
     else:
         anchor_x, anchor_y = 0.5, 0.5
 

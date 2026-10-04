@@ -12,6 +12,23 @@ buffer and the server's symmetric-but-independent.
 """
 import itertools
 import time
+from dataclasses import dataclass
+from typing import Sequence
+
+
+@dataclass(frozen=True)
+class Region:
+    """The AI Trigger Region's bounding box (GLOSSARY.md), plus the ids of
+    the strokes it covers. A small typed stand-in for the bare dict this used
+    to be -- same fields, but `ai/crop.py` and `ai/trigger.py` read them via
+    attribute access instead of string keys.
+    """
+
+    min_x: float
+    max_x: float
+    min_y: float
+    max_y: float
+    stroke_ids: Sequence[int]
 
 
 class StrokeRegionTracker:
@@ -43,7 +60,7 @@ class StrokeRegionTracker:
             self._strokes.append(self._active)
             self._active = None
 
-    def region_since_last_trigger(self) -> dict | None:
+    def region_since_last_trigger(self) -> Region | None:
         strokes = self._strokes[self._boundary_index:]
         points = [p for stroke in strokes for p in stroke["points"]]
         stroke_ids = [stroke["id"] for stroke in strokes]
@@ -57,13 +74,13 @@ class StrokeRegionTracker:
 
         xs = [p[0] for p in points]
         ys = [p[1] for p in points]
-        return {
-            "min_x": min(xs),
-            "max_x": max(xs),
-            "min_y": min(ys),
-            "max_y": max(ys),
-            "stroke_ids": stroke_ids,
-        }
+        return Region(
+            min_x=min(xs),
+            max_x=max(xs),
+            min_y=min(ys),
+            max_y=max(ys),
+            stroke_ids=stroke_ids,
+        )
 
     def mark_trigger(self) -> None:
         self._boundary_index = len(self._strokes)

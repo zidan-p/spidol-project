@@ -6,10 +6,12 @@ the Gemini call.
 import cv2
 import numpy as np
 
+from .stroke_region import Region
+
 MARGIN = 0.03
 
 
-def crop_region_from_frame(frame: np.ndarray, region: dict | None) -> np.ndarray:
+def crop_region_from_frame(frame: np.ndarray, region: Region | None) -> np.ndarray:
     """Returns the sub-image of `frame` covering `region` (normalized
     [0..1] bbox), or the whole frame if no region is known yet (e.g. an AI
     Trigger fired with no strokes drawn).
@@ -18,10 +20,10 @@ def crop_region_from_frame(frame: np.ndarray, region: dict | None) -> np.ndarray
     if region is None:
         return frame
 
-    min_x = max(0.0, region["min_x"] - MARGIN)
-    min_y = max(0.0, region["min_y"] - MARGIN)
-    max_x = min(1.0, region["max_x"] + MARGIN)
-    max_y = min(1.0, region["max_y"] + MARGIN)
+    min_x = max(0.0, region.min_x - MARGIN)
+    min_y = max(0.0, region.min_y - MARGIN)
+    max_x = min(1.0, region.max_x + MARGIN)
+    max_y = min(1.0, region.max_y + MARGIN)
 
     x0 = int(min_x * width)
     y0 = int(min_y * height)
