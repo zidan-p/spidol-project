@@ -8,15 +8,30 @@ Depends only on the HAL ABCs (`BasePositionTracker`, `BaseTouchProvider`,
 or `BlankCanvasImageSource` for a real camera source -- is a caller-side
 concern (see `main.py`), not a change here.
 
-Trigger-hook mechanism (ticket 04 decision): the AI Trigger is exposed as a
-WebSocket message, `{"type": "AI_TRIGGER"}`, that *any* connected client can
-send -- not only a literal keyboard shortcut. This matches "an abstracted AI
-Trigger event hook any input source can call": the real Stylus body button
-(ticket 05, over BLE) will fire the same server-side `handle_ai_trigger`
-call via `main.py`, exactly the way `KeyboardMockProvider` already stands in
-for the Tip Contact Switch today. For this ticket, the frontend's dev-mode
-"trigger" affordance (a keyboard shortcut) just sends this WS message --
-documented in `view/src/App.jsx`.
+Trigger-hook mechanism (ticket 04 decision, extended by ticket 05): the AI
+Trigger is exposed as a WebSocket message, `{"type": "AI_TRIGGER"}`, that
+*any* connected client can send -- not only a literal keyboard shortcut.
+This matches "an abstracted AI Trigger event hook any input source can
+call". For this ticket, the frontend's dev-mode "trigger" affordance (a
+keyboard shortcut) just sends this WS message -- documented in
+`view/src/App.jsx`.
+
+Ticket 05 adds a second, direct call path to the *same* underlying logic:
+the object yielded by `create_server`'s `async with` block exposes an async
+`server.fire_ai_trigger()` method. This exists because the real Stylus body
+button fires over a BLE GATT notification (see `hal.providers.BleTouchProvider`),
+handled by a callback registered directly with `bleak` inside the running
+server process -- it is already server-side code, running in the same
+asyncio loop as this module, with no WebSocket client in the picture at all.
+Routing it through "connect a WebSocket client to ourselves and send
+`{"type": "AI_TRIGGER"}`" would be a pointless, fragile round-trip (extra
+socket, extra JSON encode/decode, a new failure mode if that self-connection
+ever couldn't be established). Instead, `main.py` wires
+`touch_provider = BleTouchProvider(..., on_ai_trigger=server.fire_ai_trigger)`
+once the server is up, so the BLE notification calls directly into the same
+`handle_ai_trigger` + broadcast logic the WS path also uses -- `_fire_ai_trigger`
+below is the single shared implementation; both call paths are thin wrappers
+around it.
 
 Region-tracking mechanism (ticket 04 decision): the server tracks strokes
 itself via `ai.stroke_region.StrokeRegionTracker`, fed from the same
@@ -26,6 +41,7 @@ trigger message. See `ai/stroke_region.py`'s docstring for the full
 reasoning.
 """
 import asyncio
+import functools
 import json
 import time
 from contextlib import asynccontextmanager
@@ -41,6 +57,26 @@ from telemetry import build_track_update
 DEVICE_ID = "spidol_main"
 
 
+async def _fire_ai_trigger(server_box: dict, stroke_tracker, image_source, gemini_client, ai_timeout_s):
+    """The single shared implementation behind both AI-trigger call paths
+    (see this module's docstring): runs one `handle_ai_trigger` cycle and
+    broadcasts the resulting widget message to every connected client.
+
+    `handle_ai_trigger` itself is synchronous (it does its own internal
+    blocking/timeout handling around the Gemini call -- see ai/trigger.py),
+    so this wrapper's only job is picking the current `server.connections`
+    out of `server_box` (populated once `serve()` has started, see
+    `create_server` below) and broadcasting.
+    """
+    widget_message = handle_ai_trigger(
+        stroke_tracker=stroke_tracker,
+        image_source=image_source,
+        gemini_client=gemini_client,
+        timeout_s=ai_timeout_s,
+    )
+    broadcast(server_box["server"].connections, widget_message)
+
+
 def _make_handler(server_box: dict, stroke_tracker, image_source, gemini_client, ai_timeout_s):
     async def handler(websocket):
         # TRACK_UPDATE is a pure broadcast stream requiring no per-client
@@ -53,13 +89,9 @@ def _make_handler(server_box: dict, stroke_tracker, image_source, gemini_client,
                 continue
 
             if message.get("type") == "AI_TRIGGER":
-                widget_message = handle_ai_trigger(
-                    stroke_tracker=stroke_tracker,
-                    image_source=image_source,
-                    gemini_client=gemini_client,
-                    timeout_s=ai_timeout_s,
+                await _fire_ai_trigger(
+                    server_box, stroke_tracker, image_source, gemini_client, ai_timeout_s
                 )
-                broadcast(server_box["server"].connections, widget_message)
 
     return handler
 
@@ -114,6 +146,12 @@ async def create_server(
     Usage:
         async with create_server(tracker, touch_provider) as server:
             await server.wait_closed()
+
+    The yielded `server` also gets a `fire_ai_trigger()` async method
+    attached (ticket 05's direct call path -- see this module's docstring):
+
+        async with create_server(tracker, touch_provider) as server:
+            await server.fire_ai_trigger()  # no WebSocket client involved
     """
     stroke_tracker = stroke_tracker or StrokeRegionTracker()
     image_source = image_source or BlankCanvasImageSource()
@@ -123,6 +161,9 @@ async def create_server(
 
     async with serve(handler, host, port) as server:
         server_box["server"] = server
+        server.fire_ai_trigger = functools.partial(
+            _fire_ai_trigger, server_box, stroke_tracker, image_source, gemini_client, ai_timeout_s
+        )
         loop_task = asyncio.create_task(
             _telemetry_loop(server, tracker, touch_provider, stroke_tracker, fps)
         )

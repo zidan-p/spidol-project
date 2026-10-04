@@ -1,11 +1,13 @@
-"""Integration test for the dev-mode AI Trigger hook over the WebSocket
-connection (ticket 04): a client sends `{"type": "AI_TRIGGER"}`, and every
-connected client receives the resulting AI_WIDGET_SPAWN broadcast. This is
-the chosen trigger-hook mechanism -- see server_app.py's docstring for the
-reasoning (any input source, including the future real Stylus body button
-over BLE in ticket 05, can call the same server-side handler; this ticket
-exposes it as a WS message any client can also send for dev-mode testing
-without stylus hardware).
+"""Integration test for the AI Trigger hook (ticket 04's WS-message path,
+plus ticket 05's direct server-side call path): a client can send
+`{"type": "AI_TRIGGER"}` over its WebSocket connection, OR server-side code
+(e.g. a BLE notification callback) can call `server.fire_ai_trigger()`
+directly -- either way, every connected client receives the resulting
+AI_WIDGET_SPAWN broadcast, because both paths run the same shared
+`_fire_ai_trigger` logic. See server_app.py's module docstring for the full
+reasoning on why ticket 05 needed a direct, non-WebSocket call path (a real
+BLE notification handler is already server-side code; it shouldn't have to
+fake being its own WebSocket client just to reach `handle_ai_trigger`).
 """
 import asyncio
 import json
@@ -103,3 +105,32 @@ async def test_ai_trigger_with_no_gemini_client_still_spawns_from_cached_fallbac
                     break
 
     assert message["type"] == "AI_WIDGET_SPAWN"
+
+
+@pytest.mark.asyncio
+async def test_server_fire_ai_trigger_broadcasts_without_any_websocket_sender():
+    """The direct call path (ticket 05): no client ever sends the
+    `{"type": "AI_TRIGGER"}` WS message -- server-side code calls
+    `server.fire_ai_trigger()` directly, simulating what a BLE AI-trigger
+    notification callback does in `main.py`. Connected observers still get
+    the broadcast exactly as in the WS-message-triggered test above.
+    """
+    port = await _free_port()
+    tracker = SystemMouseFallbackTracker(position_source=lambda: (0, 0), screen_size=(1000, 1000))
+    touch_provider = KeyboardMockProvider()
+    gemini_client = _FakeClient(SPRING_MASS_JSON)
+
+    async with create_server(
+        tracker, touch_provider, host="127.0.0.1", port=port, fps=60, gemini_client=gemini_client
+    ) as server:
+        async with websockets.connect(f"ws://127.0.0.1:{port}") as observer:
+            await server.fire_ai_trigger()
+
+            while True:
+                raw = await asyncio.wait_for(observer.recv(), timeout=2)
+                message = json.loads(raw)
+                if message["type"] in ("AI_WIDGET_SPAWN", "AI_WIDGET_UNSUPPORTED"):
+                    break
+
+    assert message["type"] == "AI_WIDGET_SPAWN"
+    assert message["sim_type"] == "spring_mass"

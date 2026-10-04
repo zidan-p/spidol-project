@@ -10,8 +10,19 @@ static file host for the compiled `view/dist` bundle.
 v1 uses the mouse as the input source end-to-end (ticket 01): position comes
 from `SystemMouseFallbackTracker`, and the Touch Signal stand-in comes from
 the left mouse button via `KeyboardMockProvider`, bridged by a pynput click
-listener. Later tickets swap these for `OpticalColorTracker` /
-`BleTouchProvider` without changing anything below the HAL seam.
+listener. `OpticalColorTracker` (position) is still a later ticket's
+concern; `BleTouchProvider` (ticket 05, the real Stylus over BLE) is wired
+here behind `--ble-address` without changing anything below the HAL seam.
+
+BLE mode (`--ble-address <mac-or-uuid>`): `make_touch_provider` returns a
+`BleTouchProvider` instead of `KeyboardMockProvider`, the pynput mouse
+listener is skipped (no mouse involved once a real Stylus is attached), and
+`run()` starts `touch_provider.run_forever()` as a background task plus
+wires `touch_provider.set_on_ai_trigger(server.fire_ai_trigger)` once the
+server exists -- see `server_app.py`'s module docstring for why that's a
+direct call, not a self-directed WebSocket message. This firmware pairing
+(GATT service/characteristic UUIDs, GPIO pins) is documented in
+`spidol/spidol_firmware.ino`.
 """
 import argparse
 import asyncio
@@ -22,7 +33,7 @@ import threading
 from pathlib import Path
 
 from ai.gemini_pipeline import make_live_client
-from hal.providers import KeyboardMockProvider
+from hal.providers import BleTouchProvider, KeyboardMockProvider
 from hal.trackers import SystemMouseFallbackTracker
 from server_app import create_server
 
@@ -32,6 +43,10 @@ STATIC_HOST = "127.0.0.1"
 STATIC_PORT = 5000
 VIEW_DIST_DIR = Path(__file__).resolve().parent.parent / "view" / "dist"
 
+# Must match the GATT UUIDs advertised by spidol/spidol_firmware.ino.
+BLE_TOUCH_CHAR_UUID = "a1b2c3d4-0001-1000-8000-00805f9b34fb"
+BLE_AI_TRIGGER_CHAR_UUID = "a1b2c3d4-0002-1000-8000-00805f9b34fb"
+
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="SPIDOL server")
@@ -40,7 +55,33 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         action="store_true",
         help="Dev mode: WebSocket server only; serve the frontend via `pnpm run dev` instead.",
     )
+    parser.add_argument(
+        "--ble-address",
+        default=None,
+        help=(
+            "MAC (Linux/Windows) or UUID (macOS) of the SPIDOL Stylus BLE peripheral. "
+            "When set, touch signal and AI Trigger come from the real Stylus firmware "
+            "(spidol/spidol_firmware.ino) via BleTouchProvider instead of the mouse/"
+            "keyboard stand-in. Discover the address with `bleak`'s `BleakScanner.discover()` "
+            "filtering by device name 'SPIDOL_Stylus'."
+        ),
+    )
     return parser.parse_args(argv)
+
+
+def make_touch_provider(args: argparse.Namespace):
+    """Picks the touch-signal source: the real Stylus over BLE if
+    `--ble-address` was given, else the v1 mouse-click stand-in.
+    `on_ai_trigger` is deliberately left unset here -- see `run()`, which
+    wires it to `server.fire_ai_trigger` once the server exists.
+    """
+    if args.ble_address:
+        return BleTouchProvider(
+            device_address=args.ble_address,
+            touch_char_uuid=BLE_TOUCH_CHAR_UUID,
+            ai_trigger_char_uuid=BLE_AI_TRIGGER_CHAR_UUID,
+        )
+    return KeyboardMockProvider()
 
 
 def make_click_handler(touch_provider: KeyboardMockProvider):
@@ -82,13 +123,14 @@ def make_gemini_client():
 
 async def run(args: argparse.Namespace) -> None:
     tracker = SystemMouseFallbackTracker()
-    touch_provider = KeyboardMockProvider()
+    touch_provider = make_touch_provider(args)
     gemini_client = make_gemini_client()
 
-    from pynput.mouse import Listener
+    if isinstance(touch_provider, KeyboardMockProvider):
+        from pynput.mouse import Listener
 
-    listener = Listener(on_click=make_click_handler(touch_provider))
-    listener.start()
+        listener = Listener(on_click=make_click_handler(touch_provider))
+        listener.start()
 
     if not args.dev:
         if not VIEW_DIST_DIR.exists():
@@ -107,6 +149,15 @@ async def run(args: argparse.Namespace) -> None:
         port=WEBSOCKET_PORT,
         gemini_client=gemini_client,
     ) as server:
+        if isinstance(touch_provider, BleTouchProvider):
+            # Wire the real AI Trigger button straight into the server's
+            # direct call path (see server_app.py's module docstring) --
+            # the BLE notification callback calls this directly, no
+            # self-directed WebSocket message involved.
+            touch_provider.set_on_ai_trigger(server.fire_ai_trigger)
+            asyncio.create_task(touch_provider.run_forever())
+            print(f"Connecting to SPIDOL Stylus at {args.ble_address}...")
+
         await server.wait_closed()
 
 

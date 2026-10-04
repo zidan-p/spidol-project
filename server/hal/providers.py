@@ -2,10 +2,17 @@
 
 v1 ships `KeyboardMockProvider` as the mouse-click-based touch stub (this
 ticket binds it to the left mouse button in main.py). `BleTouchProvider`
-(real GATT notify consumer) is a later ticket's concern and slots in here as
-a sibling class implementing the same `BaseTouchProvider` ABC.
+(ticket 05, real GATT notify consumer) slots in here as a sibling class
+implementing the same `BaseTouchProvider` ABC.
 """
+import asyncio
+import logging
+
+from bleak import BleakClient
+
 from hal.interfaces import BaseTouchProvider
+
+logger = logging.getLogger(__name__)
 
 
 class KeyboardMockProvider(BaseTouchProvider):
@@ -23,4 +30,119 @@ class KeyboardMockProvider(BaseTouchProvider):
         self._touching = touching
 
     def is_touching(self) -> bool:
+        return self._touching
+
+
+class BleTouchProvider(BaseTouchProvider):
+    """Real-hardware touch-signal source (ticket 05): subscribes to the
+    Stylus firmware's custom GATT `touching` characteristic over BLE via
+    `bleak`, and bridges its async notification callback into the
+    synchronous `is_touching()` seam the 60fps telemetry loop calls every
+    tick (see spidol-research-notes.md section 3 -- bleak's notify API is
+    callback-based with no synchronous "read latest value" primitive, so the
+    callback just writes into a plain instance variable and `is_touching()`
+    reads it back).
+
+    Also subscribes to the second GATT characteristic the same firmware
+    exposes -- the AI Trigger button notification -- and invokes an injected
+    `on_ai_trigger` callback when it fires. This keeps `BleTouchProvider`
+    decoupled from how the AI Trigger pipeline is actually wired (that's
+    `server_app.py`'s `fire_ai_trigger` concern); this class only knows "a
+    GATT characteristic notified, call back out."
+
+    `client_factory` defaults to `bleak.BleakClient` but is a constructor
+    parameter precisely so tests can inject a fake client (no real BLE radio
+    needed) that captures the `start_notify` callback and lets a test invoke
+    it directly to simulate a GATT notification.
+    """
+
+    def __init__(
+        self,
+        device_address: str,
+        touch_char_uuid: str,
+        ai_trigger_char_uuid: str,
+        on_ai_trigger=None,
+        client_factory=BleakClient,
+    ):
+        self._device_address = device_address
+        self._touch_char_uuid = touch_char_uuid
+        self._ai_trigger_char_uuid = ai_trigger_char_uuid
+        self._on_ai_trigger = on_ai_trigger
+        self._client_factory = client_factory
+
+        self._touching = False
+        self._client = None
+
+    def set_on_ai_trigger(self, callback) -> None:
+        """Wires (or re-wires) the AI-trigger callback after construction.
+
+        Needed because of a startup-order constraint in main.py: this
+        provider must be constructed before `server_app.create_server`
+        starts (the telemetry loop needs a touch provider from its first
+        tick), but the callback we actually want to wire -- the server's
+        `fire_ai_trigger()` -- only exists on the `server` object `serve()`
+        yields, which only exists after the server has started. So
+        construction happens with `on_ai_trigger=None`, and main.py calls
+        this setter once `server` exists.
+        """
+        self._on_ai_trigger = callback
+
+    async def connect(self) -> None:
+        """Connects to the Stylus and subscribes to both GATT
+        characteristics. Must be awaited once (e.g. from an
+        `asyncio.create_task` at server startup -- see research notes
+        section 3) before `is_touching()` reports real hardware state.
+        """
+        self._client = self._client_factory(self._device_address)
+        await self._client.connect()
+        await self._client.start_notify(self._touch_char_uuid, self._on_touch_notify)
+        await self._client.start_notify(self._ai_trigger_char_uuid, self._on_ai_trigger_notify)
+
+    async def disconnect(self) -> None:
+        if self._client is not None:
+            await self._client.disconnect()
+
+    async def run_forever(self, retry_delay_s: float = 1.0) -> None:
+        """Connects and then reconnects on disconnect, forever. BLE
+        disconnects are routine on commodity hardware (research notes
+        section 3 gotchas) -- this keeps one bad link from killing the
+        whole server process. Intended to be run as its own
+        `asyncio.create_task` at server startup, in parallel with the
+        telemetry loop, exactly like `connect()` alone would be.
+        """
+        while True:
+            try:
+                await self.connect()
+                # bleak keeps notifying via callbacks on this same event
+                # loop; just idle here until the connection drops.
+                while self._client is not None and self._client.is_connected:
+                    await asyncio.sleep(retry_delay_s)
+            except Exception:
+                logger.exception("BleTouchProvider connection lost; retrying")
+            await asyncio.sleep(retry_delay_s)
+
+    def _on_touch_notify(self, _characteristic, data: bytearray) -> None:
+        # Called back on bleak's asyncio loop. Keep fast/non-blocking: just
+        # a variable assignment, per the bridge pattern in the research
+        # notes -- `is_touching()` reads this synchronously, no awaiting.
+        self._touching = bool(data[0])
+
+    def _on_ai_trigger_notify(self, _characteristic, _data: bytearray) -> None:
+        if self._on_ai_trigger is None:
+            return
+        try:
+            if asyncio.iscoroutinefunction(self._on_ai_trigger):
+                asyncio.create_task(self._on_ai_trigger())
+            else:
+                self._on_ai_trigger()
+        except Exception:
+            # A notification callback must never raise back into bleak's
+            # event loop -- a crash here would otherwise tear down the BLE
+            # connection (or the whole process) over an AI-trigger-handling
+            # bug, which is strictly worse than just logging and continuing.
+            logger.exception("on_ai_trigger callback raised")
+
+    def is_touching(self) -> bool:
+        # Synchronous, cheap, callable from the 60fps telemetry loop without
+        # awaiting anything -- the whole point of the bridge above.
         return self._touching

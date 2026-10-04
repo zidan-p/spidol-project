@@ -4,5 +4,6 @@ pynput>=1.7.6
 opencv-python>=4.8.0
 google-genai>=0.1.0
 pydantic>=2.0.0
+bleak>=0.22.0
 pytest>=8.0.0
 pytest-asyncio>=0.23.0
