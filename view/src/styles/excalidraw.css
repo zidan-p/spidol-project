@@ -41,12 +41,60 @@ body,
   pointer-events: none;
 }
 
-.status-capsule[data-connection-state='open'] {
-  color: #4ade80;
+/* Minimal functional layout for spawned SimulationWidgets (ticket 04): just
+   enough so the widget renders visibly beside the drawn formula strokes,
+   per SPEC.md's "formula and simulation appear side by side" requirement.
+   Visual polish/chrome is out of scope here (ticket 03's concern). */
+.sim-widget-layer {
+  position: absolute;
+  inset: 0;
+  z-index: 5;
+  pointer-events: none;
 }
 
-.status-capsule[data-connection-state='closed'] {
-  color: #f87171;
+.sim-widget {
+  position: absolute;
+  top: 10%;
+  right: 5%;
+  width: 280px;
+  padding: 12px 16px;
+  background: rgba(17, 17, 17, 0.85);
+  border: 1px solid #333;
+  border-radius: 8px;
+  color: #e5e7eb;
+  font: 13px ui-sans-serif, system-ui, sans-serif;
+  pointer-events: auto;
+}
+
+.sim-widget-unsupported {
+  border-color: #92400e;
+  color: #fbbf24;
+}
+
+.sim-widget-formula {
+  font-family: ui-monospace, Consolas, monospace;
+  margin: 6px 0;
+  color: #9ca3af;
+}
+
+.sim-widget-slider-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 6px 0;
+}
+
+.sim-widget-slider-row label {
+  flex: 1;
+  font-size: 11px;
+  color: #9ca3af;
+}
+
+.sim-widget-canvas {
+  display: block;
+  margin: 8px 0;
+  background: #0a0a0a;
+  border-radius: 4px;
 }
 
 .status-capsule {

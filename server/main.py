@@ -17,9 +17,11 @@ import argparse
 import asyncio
 import functools
 import http.server
+import os
 import threading
 from pathlib import Path
 
+from ai.gemini_pipeline import make_live_client
 from hal.providers import KeyboardMockProvider
 from hal.trackers import SystemMouseFallbackTracker
 from server_app import create_server
@@ -65,9 +67,23 @@ def start_static_server(directory: Path, host: str, port: int) -> threading.Thre
     return thread
 
 
+def make_gemini_client():
+    """Constructs the live Gemini client if GEMINI_API_KEY is configured,
+    else returns None -- every AI Trigger then serves the Cached Fallback
+    Schema (see ai/gemini_pipeline.py), so the server still runs and demos
+    correctly without a key configured.
+    """
+    api_key = os.environ.get("GEMINI_API_KEY")
+    if not api_key:
+        print("No GEMINI_API_KEY set; AI Trigger will always serve the Cached Fallback Schema.")
+        return None
+    return make_live_client(api_key=api_key)
+
+
 async def run(args: argparse.Namespace) -> None:
     tracker = SystemMouseFallbackTracker()
     touch_provider = KeyboardMockProvider()
+    gemini_client = make_gemini_client()
 
     from pynput.mouse import Listener
 
@@ -84,7 +100,13 @@ async def run(args: argparse.Namespace) -> None:
         print(f"Serving view/dist at http://{STATIC_HOST}:{STATIC_PORT}")
 
     print(f"WebSocket server at ws://{WEBSOCKET_HOST}:{WEBSOCKET_PORT}")
-    async with create_server(tracker, touch_provider, host=WEBSOCKET_HOST, port=WEBSOCKET_PORT) as server:
+    async with create_server(
+        tracker,
+        touch_provider,
+        host=WEBSOCKET_HOST,
+        port=WEBSOCKET_PORT,
+        gemini_client=gemini_client,
+    ) as server:
         await server.wait_closed()
 
 
