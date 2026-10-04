@@ -1,5 +1,5 @@
 """Tests for cropping the AI Trigger Region out of a captured frame, and
-encoding the crop for the Gemini call.
+encoding the crop for the vision model call.
 """
 import numpy as np
 

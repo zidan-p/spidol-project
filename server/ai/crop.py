@@ -1,7 +1,7 @@
 """Crops the AI Trigger Region (a normalized stroke bounding box, from
 `ai/stroke_region.py`) out of a captured frame (`hal/image_source.py`), with
 a small margin so stroke edges aren't clipped, and encodes the result for
-the Gemini call.
+the vision model call.
 """
 import cv2
 import numpy as np

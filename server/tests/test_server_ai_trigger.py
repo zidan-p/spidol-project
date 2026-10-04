@@ -20,22 +20,32 @@ from hal.trackers import SystemMouseFallbackTracker
 from server_app import create_server
 
 
-class _FakeModels:
+class _FakeCompletions:
     def __init__(self, response_text):
         self._response_text = response_text
 
-    def generate_content(self, *, model, contents, config):
+    def create(self, *, model, messages, response_format):
         return _FakeResponse(self._response_text)
 
 
+class _FakeMessage:
+    def __init__(self, content):
+        self.content = content
+
+
+class _FakeChoice:
+    def __init__(self, content):
+        self.message = _FakeMessage(content)
+
+
 class _FakeResponse:
-    def __init__(self, text):
-        self.text = text
+    def __init__(self, content):
+        self.choices = [_FakeChoice(content)]
 
 
 class _FakeClient:
     def __init__(self, response_text):
-        self.models = _FakeModels(response_text)
+        self.chat = type("Chat", (), {"completions": _FakeCompletions(response_text)})()
 
 
 SPRING_MASS_JSON = json.dumps(
@@ -63,10 +73,10 @@ async def test_ai_trigger_message_broadcasts_ai_widget_spawn_to_all_clients():
     port = await _free_port()
     tracker = SystemMouseFallbackTracker(position_source=lambda: (0, 0), screen_size=(1000, 1000))
     touch_provider = KeyboardMockProvider()
-    gemini_client = _FakeClient(SPRING_MASS_JSON)
+    vision_client = _FakeClient(SPRING_MASS_JSON)
 
     async with create_server(
-        tracker, touch_provider, host="127.0.0.1", port=port, fps=60, gemini_client=gemini_client
+        tracker, touch_provider, host="127.0.0.1", port=port, fps=60, vision_client=vision_client
     ):
         async with websockets.connect(f"ws://127.0.0.1:{port}") as sender, websockets.connect(
             f"ws://127.0.0.1:{port}"
@@ -89,7 +99,7 @@ async def test_ai_trigger_message_broadcasts_ai_widget_spawn_to_all_clients():
 
 
 @pytest.mark.asyncio
-async def test_ai_trigger_with_no_gemini_client_still_spawns_from_cached_fallback():
+async def test_ai_trigger_with_no_vision_client_still_spawns_from_cached_fallback():
     port = await _free_port()
     tracker = SystemMouseFallbackTracker(position_source=lambda: (0, 0), screen_size=(1000, 1000))
     touch_provider = KeyboardMockProvider()
@@ -118,10 +128,10 @@ async def test_server_fire_ai_trigger_broadcasts_without_any_websocket_sender():
     port = await _free_port()
     tracker = SystemMouseFallbackTracker(position_source=lambda: (0, 0), screen_size=(1000, 1000))
     touch_provider = KeyboardMockProvider()
-    gemini_client = _FakeClient(SPRING_MASS_JSON)
+    vision_client = _FakeClient(SPRING_MASS_JSON)
 
     async with create_server(
-        tracker, touch_provider, host="127.0.0.1", port=port, fps=60, gemini_client=gemini_client
+        tracker, touch_provider, host="127.0.0.1", port=port, fps=60, vision_client=vision_client
     ) as server:
         async with websockets.connect(f"ws://127.0.0.1:{port}") as observer:
             await server.fire_ai_trigger()

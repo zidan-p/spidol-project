@@ -41,7 +41,7 @@ from pathlib import Path
 
 from dotenv import load_dotenv
 
-from ai.gemini_pipeline import make_live_client
+from ai.vision_pipeline import DEFAULT_BASE_URL, DEFAULT_MODEL, make_live_client
 from hal.image_source import BlankCanvasImageSource, CameraImageSource
 from hal.providers import BleTouchProvider, KeyboardMockProvider
 from hal.trackers import OpticalColorTracker, SystemMouseFallbackTracker
@@ -96,6 +96,23 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
             "keyboard stand-in. Discover the address with `bleak`'s `BleakScanner.discover()` "
             "filtering by device name 'SPIDOL_Stylus'."
         ),
+    )
+    parser.add_argument(
+        "--ai-base-url",
+        default=None,
+        help=(
+            "Base URL of the OpenAI-compatible vision endpoint to use for the AI "
+            "Trigger pipeline. Overrides AI_BASE_URL. Defaults to Gemini's own "
+            "OpenAI-compatible endpoint if neither is set -- point this at "
+            "OpenRouter (https://openrouter.ai/api/v1) or any other OpenAI-"
+            "compatible provider instead to switch providers, pairing it with "
+            "--ai-model and a matching AI_API_KEY."
+        ),
+    )
+    parser.add_argument(
+        "--ai-model",
+        default=None,
+        help="Model name to request at --ai-base-url. Overrides AI_MODEL.",
     )
     return parser.parse_args(argv)
 
@@ -168,23 +185,32 @@ def make_camera_resources(args: argparse.Namespace, capture_factory=None):
     return image_source, homography, loss_bridge
 
 
-def make_gemini_client():
-    """Constructs the live Gemini client if GEMINI_API_KEY is configured,
-    else returns None -- every AI Trigger then serves the Cached Fallback
-    Schema (see ai/gemini_pipeline.py), so the server still runs and demos
-    correctly without a key configured.
+def make_vision_client(args: argparse.Namespace):
+    """Constructs the live OpenAI-compatible vision client if AI_API_KEY (or
+    the legacy GEMINI_API_KEY) is configured, else returns None -- every AI
+    Trigger then serves the Cached Fallback Schema (see
+    ai/vision_pipeline.py), so the server still runs and demos correctly
+    without a key configured.
+
+    `--ai-base-url`/AI_BASE_URL let this point at any OpenAI-compatible
+    endpoint -- Gemini's own (the default), OpenRouter
+    (https://openrouter.ai/api/v1), or another provider/router -- paired
+    with `--ai-model`/AI_MODEL for the model name to request there.
     """
-    api_key = os.environ.get("GEMINI_API_KEY")
+    api_key = os.environ.get("AI_API_KEY") or os.environ.get("GEMINI_API_KEY")
     if not api_key:
-        print("No GEMINI_API_KEY set; AI Trigger will always serve the Cached Fallback Schema.")
-        return None
-    return make_live_client(api_key=api_key)
+        print("No AI_API_KEY set; AI Trigger will always serve the Cached Fallback Schema.")
+        return None, DEFAULT_MODEL
+
+    base_url = args.ai_base_url or os.environ.get("AI_BASE_URL") or DEFAULT_BASE_URL
+    model = args.ai_model or os.environ.get("AI_MODEL") or DEFAULT_MODEL
+    return make_live_client(api_key=api_key, base_url=base_url), model
 
 
 async def run(args: argparse.Namespace) -> None:
     tracker = make_tracker(args)
     touch_provider = make_touch_provider(args)
-    gemini_client = make_gemini_client()
+    vision_client, ai_model = make_vision_client(args)
     image_source, homography, loss_bridge = make_camera_resources(args)
 
     if isinstance(touch_provider, KeyboardMockProvider):
@@ -208,7 +234,8 @@ async def run(args: argparse.Namespace) -> None:
         touch_provider,
         host=WEBSOCKET_HOST,
         port=WEBSOCKET_PORT,
-        gemini_client=gemini_client,
+        vision_client=vision_client,
+        ai_model=ai_model,
         image_source=image_source,
         homography=homography,
         loss_bridge=loss_bridge,

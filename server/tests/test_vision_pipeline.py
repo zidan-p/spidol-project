@@ -1,19 +1,19 @@
-"""Tests for the Gemini structured-output pipeline (SPEC.md 3.2.D,
+"""Tests for the provider-agnostic vision pipeline (SPEC.md 3.2.D,
 GLOSSARY.md: Cached Fallback Schema).
 
-Seam under test: `analyze_formula_crop(image_bytes, client, timeout_s=...)`,
-where `client` is anything duck-typing google-genai's
-`client.models.generate_content(...)` call shape -- a fake in all tests
-here, since no live GEMINI_API_KEY is available in this environment (see
-report). The real `google-genai` call path exists in `_call_gemini` /
-`make_live_client` but is only exercised by a fake client in this test
-suite.
+Seam under test: `analyze_formula_crop(image_bytes, client, timeout_s=...,
+model=...)`, where `client` is anything duck-typing the OpenAI chat-
+completions call shape (`client.chat.completions.create(...)` returning
+`.choices[0].message.content`) -- a fake in all tests here, since no live
+API key is available in this environment. The real OpenAI-compatible call
+path exists in `_call_model` / `make_live_client` but is only exercised by a
+fake client in this test suite.
 """
 import time
 
 import pytest
 
-from ai.gemini_pipeline import (
+from ai.vision_pipeline import (
     CACHED_FALLBACK_SCHEMA,
     FormulaAnalysis,
     SimulationType,
@@ -22,13 +22,13 @@ from ai.gemini_pipeline import (
 )
 
 
-class _FakeModels:
+class _FakeCompletions:
     def __init__(self, response_text=None, *, raises=None, delay=0.0):
         self._response_text = response_text
         self._raises = raises
         self._delay = delay
 
-    def generate_content(self, *, model, contents, config):
+    def create(self, *, model, messages, response_format):
         if self._delay:
             time.sleep(self._delay)
         if self._raises:
@@ -36,14 +36,29 @@ class _FakeModels:
         return _FakeResponse(self._response_text)
 
 
+class _FakeChat:
+    def __init__(self, **kwargs):
+        self.completions = _FakeCompletions(**kwargs)
+
+
+class _FakeMessage:
+    def __init__(self, content):
+        self.content = content
+
+
+class _FakeChoice:
+    def __init__(self, content):
+        self.message = _FakeMessage(content)
+
+
 class _FakeResponse:
-    def __init__(self, text):
-        self.text = text
+    def __init__(self, content):
+        self.choices = [_FakeChoice(content)]
 
 
 class _FakeClient:
     def __init__(self, **kwargs):
-        self.models = _FakeModels(**kwargs)
+        self.chat = _FakeChat(**kwargs)
 
 
 SPRING_MASS_JSON = """
@@ -102,7 +117,7 @@ def test_unrecognized_simulation_type_is_not_supported():
     assert is_supported_simulation_type("quantum_tunneling") is False
 
 
-def test_malformed_json_from_gemini_falls_back_to_cached_schema():
+def test_malformed_json_falls_back_to_cached_schema():
     client = _FakeClient(response_text="not valid json at all")
 
     result = analyze_formula_crop(b"fake-png-bytes", client, timeout_s=3.0)
@@ -111,9 +126,9 @@ def test_malformed_json_from_gemini_falls_back_to_cached_schema():
 
 
 def test_out_of_enum_simulation_type_still_parses_successfully():
-    # response_schema constrains shape/types, not enum membership (unless the
+    # The JSON schema constrains shape/types, not enum membership (unless the
     # Pydantic field itself is typed as the Enum, which we deliberately avoid
-    # -- see gemini_pipeline.py docstring). An out-of-enum value must parse
+    # -- see vision_pipeline.py docstring). An out-of-enum value must parse
     # fine here so application code can route it to AI_WIDGET_UNSUPPORTED
     # rather than erroring out.
     body = SPRING_MASS_JSON.replace("spring_mass", "quantum_tunneling")
@@ -123,3 +138,20 @@ def test_out_of_enum_simulation_type_still_parses_successfully():
 
     assert result.simulation_type == "quantum_tunneling"
     assert is_supported_simulation_type(result.simulation_type) is False
+
+
+def test_passes_requested_model_through_to_the_client():
+    seen = {}
+
+    class _RecordingCompletions:
+        def create(self, *, model, messages, response_format):
+            seen["model"] = model
+            return _FakeResponse(SPRING_MASS_JSON)
+
+    class _RecordingClient:
+        def __init__(self):
+            self.chat = type("Chat", (), {"completions": _RecordingCompletions()})()
+
+    analyze_formula_crop(b"fake-png-bytes", _RecordingClient(), timeout_s=3.0, model="some/other-model")
+
+    assert seen["model"] == "some/other-model"

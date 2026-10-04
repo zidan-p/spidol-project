@@ -4,7 +4,7 @@ builder (SPEC.md section 4.B).
 import json
 
 from ai.dispatch import build_widget_message
-from ai.gemini_pipeline import FormulaAnalysis, Parameter
+from ai.vision_pipeline import FormulaAnalysis, Parameter
 
 
 def test_recognized_simulation_type_builds_ai_widget_spawn():

@@ -3,7 +3,7 @@ documented in SPEC.md section 4.B, from a parsed `FormulaAnalysis`.
 """
 import json
 
-from .gemini_pipeline import FormulaAnalysis, is_supported_simulation_type
+from .vision_pipeline import FormulaAnalysis, is_supported_simulation_type
 
 
 def build_widget_message(

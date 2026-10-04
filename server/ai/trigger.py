@@ -2,9 +2,10 @@
 
     1. Compute the AI Trigger Region (every stroke since the last trigger
        or clear) from the server-side `StrokeRegionTracker`.
-    2. Crop that region out of the current camera frame (today: the
-       `BlankCanvasImageSource` stub -- see hal/image_source.py).
-    3. Call Gemini (with the Cached Fallback Schema on error/timeout).
+    2. Crop that region out of the current frame (`CameraImageSource` in
+       camera mode, `BlankCanvasImageSource` otherwise -- see
+       hal/image_source.py).
+    3. Call the vision model (with the Cached Fallback Schema on error/timeout).
     4. Dispatch AI_WIDGET_SPAWN / AI_WIDGET_UNSUPPORTED.
 
 This module is what `server_app.py`'s WS message handler calls when it
@@ -17,7 +18,7 @@ from hal.image_source import BaseImageSource
 
 from .crop import crop_region_from_frame, encode_png
 from .dispatch import build_widget_message
-from .gemini_pipeline import DEFAULT_TIMEOUT_S, analyze_formula_crop
+from .vision_pipeline import DEFAULT_MODEL, DEFAULT_TIMEOUT_S, analyze_formula_crop
 from .stroke_region import StrokeRegionTracker
 
 _widget_id_counter = itertools.count(1)
@@ -27,15 +28,16 @@ def handle_ai_trigger(
     *,
     stroke_tracker: StrokeRegionTracker,
     image_source: BaseImageSource,
-    gemini_client,
+    vision_client,
     timeout_s: float = DEFAULT_TIMEOUT_S,
+    model: str = DEFAULT_MODEL,
 ) -> str:
     """Runs one full AI Trigger cycle and returns the wire message (JSON
     string) to broadcast to clients.
     """
     region = stroke_tracker.region_since_last_trigger()
     # Mark the trigger boundary immediately, before the (potentially slow)
-    # Gemini call, so strokes drawn *during* that call start a fresh region
+    # vision model call, so strokes drawn *during* that call start a fresh region
     # rather than being silently folded into this one.
     stroke_tracker.mark_trigger()
 
@@ -43,7 +45,7 @@ def handle_ai_trigger(
     crop = crop_region_from_frame(frame, region)
     image_bytes = encode_png(crop)
 
-    analysis = analyze_formula_crop(image_bytes, gemini_client, timeout_s=timeout_s)
+    analysis = analyze_formula_crop(image_bytes, vision_client, timeout_s=timeout_s, model=model)
 
     widget_id = f"widget_{next(_widget_id_counter):02d}"
     if region is not None:

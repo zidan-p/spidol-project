@@ -77,6 +77,7 @@ from websockets.asyncio.server import serve, broadcast
 
 from ai.stroke_region import StrokeRegionTracker
 from ai.trigger import handle_ai_trigger
+from ai.vision_pipeline import DEFAULT_MODEL
 from hal.image_source import BaseImageSource, BlankCanvasImageSource
 from hal.interfaces import BasePositionTracker, BaseTouchProvider
 from telemetry import build_track_update
@@ -91,13 +92,15 @@ DEVICE_ID = "spidol_main"
 DEFAULT_CALIBRATION_POINTS = [(0.0, 0.0), (1.0, 0.0), (1.0, 1.0), (0.0, 1.0)]
 
 
-async def _fire_ai_trigger(server_box: dict, stroke_tracker, image_source, gemini_client, ai_timeout_s):
+async def _fire_ai_trigger(
+    server_box: dict, stroke_tracker, image_source, vision_client, ai_timeout_s, ai_model
+):
     """The single shared implementation behind both AI-trigger call paths
     (see this module's docstring): runs one `handle_ai_trigger` cycle and
     broadcasts the resulting widget message to every connected client.
 
     `handle_ai_trigger` itself is synchronous (it does its own internal
-    blocking/timeout handling around the Gemini call -- see ai/trigger.py),
+    blocking/timeout handling around the vision model call -- see ai/trigger.py),
     so this wrapper's only job is picking the current `server.connections`
     out of `server_box` (populated once `serve()` has started, see
     `create_server` below) and broadcasting.
@@ -105,14 +108,21 @@ async def _fire_ai_trigger(server_box: dict, stroke_tracker, image_source, gemin
     widget_message = handle_ai_trigger(
         stroke_tracker=stroke_tracker,
         image_source=image_source,
-        gemini_client=gemini_client,
+        vision_client=vision_client,
         timeout_s=ai_timeout_s,
+        model=ai_model,
     )
     broadcast(server_box["server"].connections, widget_message)
 
 
 def _make_handler(
-    server_box: dict, stroke_tracker, image_source, gemini_client, ai_timeout_s, homography=None
+    server_box: dict,
+    stroke_tracker,
+    image_source,
+    vision_client,
+    ai_timeout_s,
+    ai_model,
+    homography=None,
 ):
     async def handler(websocket):
         # TRACK_UPDATE is a pure broadcast stream requiring no per-client
@@ -129,7 +139,7 @@ def _make_handler(
 
             if message_type == "AI_TRIGGER":
                 await _fire_ai_trigger(
-                    server_box, stroke_tracker, image_source, gemini_client, ai_timeout_s
+                    server_box, stroke_tracker, image_source, vision_client, ai_timeout_s, ai_model
                 )
             elif message_type == "CANVAS_CLEAR":
                 stroke_tracker.clear()
@@ -199,18 +209,21 @@ async def create_server(
     fps: int = 60,
     stroke_tracker: StrokeRegionTracker | None = None,
     image_source: BaseImageSource | None = None,
-    gemini_client=None,
+    vision_client=None,
     ai_timeout_s: float = 3.0,
+    ai_model: str = DEFAULT_MODEL,
     homography: HomographyCalibrator | None = None,
     loss_bridge: TrackingLossBridge | None = None,
 ):
     """Starts the WebSocket server, its telemetry broadcast loop, and the AI
     Trigger hook together.
 
-    `gemini_client` is optional and defaults to `None` (no live API calls --
+    `vision_client` is optional and defaults to `None` (no live API calls --
     every AI Trigger serves the Cached Fallback Schema instead; see
-    `ai/gemini_pipeline.py`), so tests and dev runs without a configured
-    GEMINI_API_KEY still work end-to-end.
+    `ai/vision_pipeline.py`), so tests and dev runs without a configured
+    API key still work end-to-end. `ai_model` is the model name requested at
+    whatever OpenAI-compatible endpoint `vision_client` was built against
+    (see `main.py`'s `AI_BASE_URL`/`AI_MODEL`/`--ai-base-url`/`--ai-model`).
 
     Usage:
         async with create_server(tracker, touch_provider) as server:
@@ -227,13 +240,25 @@ async def create_server(
 
     server_box: dict = {}
     handler = _make_handler(
-        server_box, stroke_tracker, image_source, gemini_client, ai_timeout_s, homography=homography
+        server_box,
+        stroke_tracker,
+        image_source,
+        vision_client,
+        ai_timeout_s,
+        ai_model,
+        homography=homography,
     )
 
     async with serve(handler, host, port) as server:
         server_box["server"] = server
         server.fire_ai_trigger = functools.partial(
-            _fire_ai_trigger, server_box, stroke_tracker, image_source, gemini_client, ai_timeout_s
+            _fire_ai_trigger,
+            server_box,
+            stroke_tracker,
+            image_source,
+            vision_client,
+            ai_timeout_s,
+            ai_model,
         )
         loop_task = asyncio.create_task(
             _telemetry_loop(

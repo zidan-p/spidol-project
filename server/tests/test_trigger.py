@@ -1,5 +1,5 @@
-"""Tests for the full AI Trigger orchestration: region -> crop -> Gemini ->
-dispatch (SPEC.md 3.2.D steps 1-5).
+"""Tests for the full AI Trigger orchestration: region -> crop -> vision
+model -> dispatch (SPEC.md 3.2.D steps 1-5).
 """
 import json
 
@@ -8,22 +8,32 @@ from ai.stroke_region import StrokeRegionTracker
 from hal.image_source import BlankCanvasImageSource
 
 
-class _FakeModels:
+class _FakeCompletions:
     def __init__(self, response_text):
         self._response_text = response_text
 
-    def generate_content(self, *, model, contents, config):
+    def create(self, *, model, messages, response_format):
         return _FakeResponse(self._response_text)
 
 
+class _FakeMessage:
+    def __init__(self, content):
+        self.content = content
+
+
+class _FakeChoice:
+    def __init__(self, content):
+        self.message = _FakeMessage(content)
+
+
 class _FakeResponse:
-    def __init__(self, text):
-        self.text = text
+    def __init__(self, content):
+        self.choices = [_FakeChoice(content)]
 
 
 class _FakeClient:
     def __init__(self, response_text):
-        self.models = _FakeModels(response_text)
+        self.chat = type("Chat", (), {"completions": _FakeCompletions(response_text)})()
 
 
 SPRING_MASS_JSON = json.dumps(
@@ -54,7 +64,7 @@ def test_handle_ai_trigger_spawns_widget_for_recognized_formula():
     raw = handle_ai_trigger(
         stroke_tracker=tracker,
         image_source=image_source,
-        gemini_client=client,
+        vision_client=client,
         timeout_s=1.0,
     )
     payload = json.loads(raw)
@@ -71,7 +81,7 @@ def test_handle_ai_trigger_marks_trigger_so_region_resets():
     image_source = BlankCanvasImageSource()
 
     handle_ai_trigger(
-        stroke_tracker=tracker, image_source=image_source, gemini_client=client, timeout_s=1.0
+        stroke_tracker=tracker, image_source=image_source, vision_client=client, timeout_s=1.0
     )
 
     assert tracker.region_since_last_trigger() is None
@@ -83,7 +93,7 @@ def test_handle_ai_trigger_with_no_strokes_still_works():
     image_source = BlankCanvasImageSource()
 
     raw = handle_ai_trigger(
-        stroke_tracker=tracker, image_source=image_source, gemini_client=client, timeout_s=1.0
+        stroke_tracker=tracker, image_source=image_source, vision_client=client, timeout_s=1.0
     )
     payload = json.loads(raw)
 
@@ -95,7 +105,7 @@ def test_handle_ai_trigger_with_no_client_falls_back_to_cached_schema_and_still_
     image_source = BlankCanvasImageSource()
 
     raw = handle_ai_trigger(
-        stroke_tracker=tracker, image_source=image_source, gemini_client=None, timeout_s=1.0
+        stroke_tracker=tracker, image_source=image_source, vision_client=None, timeout_s=1.0
     )
     payload = json.loads(raw)
 

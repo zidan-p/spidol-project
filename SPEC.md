@@ -55,7 +55,7 @@ spidol-project/
 │   │   ├── homography.py        # 4-point projector corner calibration & planar warping
 │   │   └── contour_detector.py  # ROI-selection helper for the AI Trigger (not an autonomous trigger)
 │   └── ai/
-│       └── gemini_pipeline.py   # Formula crop -> Gemini Vision -> Simulation Type + params
+│       └── vision_pipeline.py   # Formula crop -> vision model -> Simulation Type + params
 │
 └── view/                        # Subproject 3: Interactive Canvas Web App (React + Vite + pnpm)
     ├── package.json             # pnpm package manifest
@@ -96,7 +96,7 @@ spidol-project/
 
 ### 3.2 Subproject `./server` (Python Engine & Pluggable Architecture)
 - **Environment:** Isolated Python Virtual Environment (`.venv`) using Python 3.10+.
-- **Key Dependencies:** `opencv-python>=4.8.0`, `websockets>=12.0`, `numpy>=1.24.0`, `google-genai` (current SDK; `google-generativeai` is legacy/deprecated), `bleak` (BLE GATT client).
+- **Key Dependencies:** `opencv-python>=4.8.0`, `websockets>=12.0`, `numpy>=1.24.0`, `openai` (OpenAI-compatible client, used against Gemini's own OpenAI-compatible endpoint by default — see ADR-0005), `bleak` (BLE GATT client).
 
 #### A. Hardware Abstraction Layer (HAL / Open-Closed Architecture)
 ```python
@@ -126,12 +126,12 @@ class BaseTouchProvider(ABC):
 - **Tracking Loss:** when `OpticalColorTracker` loses the Pen Tip — most commonly the writer's own hand/wrist occluding it during normal strokes, distinct from the Projector Shadow Principle below — the server interpolates a straight line between the last-known and reacquired points for losses under ~150ms. Beyond that threshold, the stroke ends (pen-up) rather than guessing across a longer gap.
 - **Projector Shadow Principle:** the camera is co-located immediately adjacent to the projector lens or mounted overhead. Because instructors instinctively stand to the side to avoid blocking the projected light beam with their own shadow, the camera maintains an unobstructed line-of-sight to the whiteboard for most of a session.
 
-#### D. Gesture Recognition & Multimodal AI Pipeline (`ai/gemini_pipeline.py`)
+#### D. Gesture Recognition & Multimodal AI Pipeline (`ai/vision_pipeline.py`)
 - The AI Trigger is the body-button press — **not** automatic closed-contour detection **(ADR-0002)**. Contour detection only helps select the ROI (the last-closed contour if one exists).
 - The **AI Trigger Region** submitted is every stroke drawn since the last AI Trigger or canvas clear, not a fixed time window, so a mid-formula pause never clips it. Submitted strokes remain visible on the canvas afterward.
 - On AI Trigger:
   1. The server extracts a sub-image (ROI) from the camera buffer covering the AI Trigger Region.
-  2. The image is passed to **Gemini 3.1 Flash-Lite** (or newer — verify against `client.models.list()` at implementation time, as this model family churns every few months; `gemini-1.5-flash` is retired as of Sept 2025 and `gemini-3.5-flash-lite` does not exist, neither must be referenced in code) via the **`google-genai`** SDK (`from google import genai`; the legacy `google-generativeai` package is deprecated) with a structured `response_schema` constraint.
+  2. The image is passed to a configurable OpenAI-compatible vision endpoint via the **`openai`** Python package (**ADR-0005**) — defaults to Gemini's own OpenAI-compatible endpoint with **Gemini 3.1 Flash-Lite** (or newer — verify at implementation time, as this model family churns every few months; `gemini-1.5-flash` is retired as of Sept 2025 and `gemini-3.5-flash-lite` does not exist, neither must be referenced in code), but `AI_BASE_URL`/`AI_MODEL`/`--ai-base-url`/`--ai-model` can point it at OpenRouter or any other OpenAI-compatible provider instead — with a structured `response_format={"type": "json_schema", ...}` constraint.
   3. Response payload:
      ```json
      {
