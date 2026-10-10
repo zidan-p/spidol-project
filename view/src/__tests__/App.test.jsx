@@ -1,7 +1,10 @@
 // Tests for the dev-mode AI Trigger wiring in App.jsx: pressing the
-// trigger keyboard shortcut sends {"type": "AI_TRIGGER"} over the socket,
-// and incoming AI_WIDGET_SPAWN / AI_WIDGET_UNSUPPORTED events render a
-// SimulationWidget.
+// trigger keyboard shortcut sends {"type": "AI_TRIGGER", image_png_base64}
+// over the socket (the canvas snapshot lets the server's AI pipeline see
+// what was actually drawn in mouse-fallback dev mode -- jsdom has no real
+// canvas context, so it's always null in these tests, see Canvas.jsx's
+// exportPngBase64 guard), and incoming AI_WIDGET_SPAWN /
+// AI_WIDGET_UNSUPPORTED events render a SimulationWidget.
 import { act, fireEvent, render, screen } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import App from '../App'
@@ -45,7 +48,9 @@ describe('App AI Trigger dev-mode hook', () => {
 
     fireEvent.keyDown(window, { key: 't' })
 
-    expect(socket.sent).toEqual([JSON.stringify({ type: 'AI_TRIGGER' })])
+    expect(socket.sent).toEqual([
+      JSON.stringify({ type: 'AI_TRIGGER', image_png_base64: null }),
+    ])
   })
 
   it('renders a SimulationWidget when AI_WIDGET_SPAWN arrives', () => {

@@ -77,7 +77,12 @@ function App() {
     const onKeyDown = (event) => {
       const key = event.key.toLowerCase()
       if (key === AI_TRIGGER_KEY) {
-        sendMessage({ type: 'AI_TRIGGER' })
+        // Sends the current canvas pixels along with the trigger so the
+        // server's BrowserCanvasImageSource has a real frame to crop in
+        // mouse-fallback dev mode (no real camera) -- see Canvas.jsx's
+        // exportPngBase64 and server_app.py's AI_TRIGGER handler.
+        const image_png_base64 = canvasRef.current?.exportPngBase64() ?? null
+        sendMessage({ type: 'AI_TRIGGER', image_png_base64 })
       } else if (key === CALIBRATE_KEY) {
         // Calibration Hotkey (GLOSSARY.md): manual, operator-triggered
         // re-run of the 4-point homography calibration -- never automatic

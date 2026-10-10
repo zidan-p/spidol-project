@@ -10,12 +10,16 @@ BLE notification handler is already server-side code; it shouldn't have to
 fake being its own WebSocket client just to reach `handle_ai_trigger`).
 """
 import asyncio
+import base64
 import json
 import time
 
+import cv2
+import numpy as np
 import pytest
 import websockets
 
+from hal.image_source import BrowserCanvasImageSource
 from hal.providers import KeyboardMockProvider
 from hal.trackers import SystemMouseFallbackTracker
 from server_app import create_server
@@ -204,3 +208,66 @@ async def test_slow_ai_trigger_does_not_block_new_connections():
         f"new connection took {elapsed:.2f}s to connect+receive while an AI Trigger "
         "was in flight -- the event loop is blocked by the AI call"
     )
+
+
+@pytest.mark.asyncio
+async def test_ai_trigger_with_image_png_base64_crops_the_submitted_canvas_not_a_blank_frame():
+    """Regression test: in mouse-fallback dev mode (no real camera), the AI
+    Trigger pipeline used to always crop `BlankCanvasImageSource`'s fixed
+    blank frame -- the live vision model could never see what was actually
+    drawn. The frontend now sends its own canvas pixels (`image_png_base64`)
+    alongside the `AI_TRIGGER` message; the server must decode them into the
+    `BrowserCanvasImageSource` and crop *that*, not a blank frame.
+    """
+    port = await _free_port()
+    tracker = SystemMouseFallbackTracker(position_source=lambda: (0, 0), screen_size=(1000, 1000))
+    touch_provider = KeyboardMockProvider()
+
+    seen_images = []
+
+    class _RecordingCompletions:
+        def create(self, *, model, messages, response_format):
+            image_url = messages[0]["content"][1]["image_url"]["url"]
+            seen_images.append(image_url)
+            return _FakeResponse(SPRING_MASS_JSON)
+
+    class _RecordingClient:
+        def __init__(self):
+            self.chat = type("Chat", (), {"completions": _RecordingCompletions()})()
+
+    # A distinctly-colored (non-white) frame, so we can tell it apart from
+    # BlankCanvasImageSource's all-white default.
+    drawn_frame = np.full((300, 400, 3), 17, dtype=np.uint8)
+    ok, encoded = cv2.imencode(".png", drawn_frame)
+    assert ok
+    image_png_base64 = base64.b64encode(encoded.tobytes()).decode("ascii")
+
+    image_source = BrowserCanvasImageSource()
+
+    async with create_server(
+        tracker,
+        touch_provider,
+        host="127.0.0.1",
+        port=port,
+        fps=60,
+        vision_client=_RecordingClient(),
+        image_source=image_source,
+    ):
+        async with websockets.connect(f"ws://127.0.0.1:{port}") as client:
+            await client.send(
+                json.dumps({"type": "AI_TRIGGER", "image_png_base64": image_png_base64})
+            )
+
+            while True:
+                raw = await asyncio.wait_for(client.recv(), timeout=2)
+                message = json.loads(raw)
+                if message["type"] in ("AI_WIDGET_SPAWN", "AI_WIDGET_UNSUPPORTED"):
+                    break
+
+    assert len(seen_images) == 1
+    # The crop should be decoded from the submitted (grey, value=17) frame,
+    # not BlankCanvasImageSource's white (255) default.
+    decoded_header = seen_images[0].split(",", 1)[1]
+    decoded_bytes = base64.b64decode(decoded_header)
+    decoded_array = cv2.imdecode(np.frombuffer(decoded_bytes, dtype=np.uint8), cv2.IMREAD_COLOR)
+    assert (decoded_array < 255).any()

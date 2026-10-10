@@ -120,6 +120,18 @@ export const Canvas = forwardRef(function Canvas(
         historyRef.current = createHistory()
         notifyHistoryChange()
       },
+      exportPngBase64() {
+        // Lets the AI Trigger pipeline see what was actually drawn in
+        // mouse-fallback dev mode (no real camera) -- sent alongside the
+        // AI_TRIGGER message (see App.jsx) so the server's
+        // BrowserCanvasImageSource has a real frame to crop instead of
+        // BlankCanvasImageSource's fixed blank one. jsdom-rendered tests
+        // have no real canvas context (see the guard below), so this
+        // returns null there rather than throwing.
+        const canvas = canvasRef.current
+        if (!canvas || !canvas.getContext('2d')) return null
+        return canvas.toDataURL('image/png').split(',', 2)[1]
+      },
     }),
     // eslint-disable-next-line react-hooks/exhaustive-deps
     []

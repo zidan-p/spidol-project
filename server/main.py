@@ -42,7 +42,7 @@ from pathlib import Path
 from dotenv import load_dotenv
 
 from ai.vision_pipeline import DEFAULT_BASE_URL, DEFAULT_MODEL, make_live_client
-from hal.image_source import BlankCanvasImageSource, CameraImageSource
+from hal.image_source import BrowserCanvasImageSource, CameraImageSource
 from hal.providers import BleTouchProvider, KeyboardMockProvider
 from hal.trackers import OpticalColorTracker, SystemMouseFallbackTracker
 from server_app import create_server
@@ -114,6 +114,18 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         default=None,
         help="Model name to request at --ai-base-url. Overrides AI_MODEL.",
     )
+    parser.add_argument(
+        "--ai-timeout-s",
+        type=float,
+        default=None,
+        help=(
+            "Seconds to wait for the live vision model call before falling back "
+            "to the Cached Fallback Schema. Overrides AI_TIMEOUT_S. Defaults to "
+            "3.0 -- real OpenAI-compatible routers/providers can easily take "
+            "longer than that, so raise this if AI Triggers always serve the "
+            "fallback despite a working AI_API_KEY/AI_BASE_URL/AI_MODEL."
+        ),
+    )
     return parser.parse_args(argv)
 
 
@@ -169,14 +181,20 @@ def start_static_server(directory: Path, host: str, port: int) -> threading.Thre
 def make_camera_resources(args: argparse.Namespace, capture_factory=None):
     """Builds the camera-dependent trio -- image source, homography
     calibrator, tracking-loss bridge -- for `--tracker=optical-color`, or the
-    v1 mouse-mode defaults (blank image source, no homography/loss bridge)
-    otherwise. Mirrors `make_touch_provider`'s `--ble-address` branch.
+    v1 mouse-mode defaults otherwise. Mirrors `make_touch_provider`'s
+    `--ble-address` branch.
+
+    Mouse mode uses `BrowserCanvasImageSource`, not `BlankCanvasImageSource`:
+    the frontend sends its own canvas pixels alongside `AI_TRIGGER` (see
+    `server_app.py`'s handler), so the AI pipeline can actually see what was
+    drawn even with no real camera wired -- `BlankCanvasImageSource`'s fixed
+    blank frame meant the live vision model could never recognize anything.
 
     `capture_factory` is forwarded to `CameraImageSource` purely so tests can
     avoid opening a real camera device (see hal/image_source.py).
     """
     if args.tracker != "optical-color":
-        return BlankCanvasImageSource(), None, None
+        return BrowserCanvasImageSource(), None, None
 
     kwargs = {} if capture_factory is None else {"capture_factory": capture_factory}
     image_source = CameraImageSource(camera_index=args.camera_index, **kwargs)
@@ -207,10 +225,23 @@ def make_vision_client(args: argparse.Namespace):
     return make_live_client(api_key=api_key, base_url=base_url), model
 
 
+def make_ai_timeout_s(args: argparse.Namespace) -> float:
+    """Resolves `--ai-timeout-s`/AI_TIMEOUT_S, defaulting to 3.0. Real
+    OpenAI-compatible routers/providers can easily take longer than that --
+    if AI Triggers always serve the Cached Fallback Schema despite a working
+    key/base_url/model, this is usually why.
+    """
+    if args.ai_timeout_s is not None:
+        return args.ai_timeout_s
+    env_value = os.environ.get("AI_TIMEOUT_S")
+    return float(env_value) if env_value else 3.0
+
+
 async def run(args: argparse.Namespace) -> None:
     tracker = make_tracker(args)
     touch_provider = make_touch_provider(args)
     vision_client, ai_model = make_vision_client(args)
+    ai_timeout_s = make_ai_timeout_s(args)
     image_source, homography, loss_bridge = make_camera_resources(args)
 
     if isinstance(touch_provider, KeyboardMockProvider):
@@ -236,6 +267,7 @@ async def run(args: argparse.Namespace) -> None:
         port=WEBSOCKET_PORT,
         vision_client=vision_client,
         ai_model=ai_model,
+        ai_timeout_s=ai_timeout_s,
         image_source=image_source,
         homography=homography,
         loss_bridge=loss_bridge,

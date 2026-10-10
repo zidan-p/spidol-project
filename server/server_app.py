@@ -68,6 +68,7 @@ Trigger Region, matching `ai/stroke_region.py`'s documented `clear()` contract
 -- previously nothing called it from the live server.
 """
 import asyncio
+import base64
 import functools
 import json
 import time
@@ -147,6 +148,14 @@ def _make_handler(
             message_type = message.get("type")
 
             if message_type == "AI_TRIGGER":
+                image_png_base64 = message.get("image_png_base64")
+                if image_png_base64 and hasattr(image_source, "set_frame_from_png_bytes"):
+                    # Lets mouse-fallback dev mode (no real camera) actually
+                    # see what was drawn -- the frontend sends its own
+                    # canvas pixels rather than the AI Trigger pipeline
+                    # cropping BlankCanvasImageSource's fixed blank frame.
+                    # See hal/image_source.py's BrowserCanvasImageSource.
+                    image_source.set_frame_from_png_bytes(base64.b64decode(image_png_base64))
                 await _fire_ai_trigger(
                     server_box, stroke_tracker, image_source, vision_client, ai_timeout_s, ai_model
                 )

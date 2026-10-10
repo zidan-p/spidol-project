@@ -1,9 +1,15 @@
 """Tests for the camera-frame source stub (ticket 02 isn't built yet; see
 `hal/image_source.py` docstring for the documented stand-in decision).
 """
+import cv2
 import numpy as np
 
-from hal.image_source import BaseImageSource, BlankCanvasImageSource, CameraImageSource
+from hal.image_source import (
+    BaseImageSource,
+    BlankCanvasImageSource,
+    BrowserCanvasImageSource,
+    CameraImageSource,
+)
 
 
 def test_blank_canvas_image_source_returns_frame_of_requested_size():
@@ -85,3 +91,37 @@ def test_camera_image_source_falls_back_to_blank_frame_when_read_fails():
 
     assert isinstance(frame, np.ndarray)
     assert frame.shape == (720, 1280, 3)
+
+
+def test_browser_canvas_image_source_returns_blank_frame_before_any_snapshot():
+    source = BrowserCanvasImageSource(width=640, height=480)
+
+    frame = source.capture_frame()
+
+    assert isinstance(frame, np.ndarray)
+    assert frame.shape == (480, 640, 3)
+    assert (frame == 255).all()
+
+
+def test_browser_canvas_image_source_decodes_a_submitted_png_snapshot():
+    source = BrowserCanvasImageSource()
+    original = np.full((300, 400, 3), 17, dtype=np.uint8)
+    ok, encoded = cv2.imencode(".png", original)
+    assert ok
+
+    source.set_frame_from_png_bytes(encoded.tobytes())
+    frame = source.capture_frame()
+
+    assert frame.shape == (300, 400, 3)
+    assert (frame == 17).all()
+
+
+def test_browser_canvas_image_source_ignores_corrupt_png_bytes():
+    source = BrowserCanvasImageSource(width=10, height=10)
+
+    source.set_frame_from_png_bytes(b"not a real png")
+    frame = source.capture_frame()
+
+    # Corrupt/undecodable bytes must not crash the AI Trigger crop -- falls
+    # back to the last good frame (the initial blank one here).
+    assert (frame == 255).all()

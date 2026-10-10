@@ -5,7 +5,7 @@ real Stylus firmware via `BleTouchProvider`."""
 from pynput.mouse import Button
 
 from main import make_camera_resources, make_click_handler, make_touch_provider, make_tracker, parse_args
-from hal.image_source import BlankCanvasImageSource, CameraImageSource
+from hal.image_source import BrowserCanvasImageSource, CameraImageSource
 from hal.providers import BleTouchProvider, KeyboardMockProvider
 from hal.trackers import OpticalColorTracker, SystemMouseFallbackTracker
 from vision.homography import HomographyCalibrator
@@ -108,11 +108,11 @@ class _FakeVideoCapture:
         pass
 
 
-def test_make_camera_resources_returns_blank_source_and_no_homography_for_mouse_tracker():
+def test_make_camera_resources_returns_browser_canvas_source_and_no_homography_for_mouse_tracker():
     args = parse_args([])
     image_source, homography, loss_bridge = make_camera_resources(args)
 
-    assert isinstance(image_source, BlankCanvasImageSource)
+    assert isinstance(image_source, BrowserCanvasImageSource)
     assert homography is None
     assert loss_bridge is None
 

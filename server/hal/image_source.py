@@ -78,3 +78,36 @@ class CameraImageSource(BaseImageSource):
 
     def release(self) -> None:
         self._capture.release()
+
+
+class BrowserCanvasImageSource(BaseImageSource):
+    """`BaseImageSource` fed by the frontend's own canvas pixels over the
+    WebSocket (`set_frame_from_png_bytes`, called from the server's
+    `CANVAS_SNAPSHOT`/`AI_TRIGGER` message handling), rather than a physical
+    camera.
+
+    This is what lets the AI Trigger pipeline actually see what was drawn
+    when testing in mouse-fallback dev mode (`--tracker=mouse`, no real
+    camera wired) -- without it, `BlankCanvasImageSource`'s fixed blank frame
+    meant the AI Trigger Region crop was always empty, so the live vision
+    model call could never recognize anything actually drawn on the canvas,
+    only ever exercising the Cached Fallback Schema path. Camera mode
+    (`--tracker=optical-color`) still uses `CameraImageSource` instead; this
+    class is the mouse-mode counterpart.
+    """
+
+    def __init__(self, width: int = 1280, height: int = 720):
+        self._width = width
+        self._height = height
+        self._frame = np.full((height, width, 3), 255, dtype=np.uint8)
+
+    def set_frame_from_png_bytes(self, png_bytes: bytes) -> None:
+        import cv2
+
+        array = np.frombuffer(png_bytes, dtype=np.uint8)
+        decoded = cv2.imdecode(array, cv2.IMREAD_COLOR)
+        if decoded is not None:
+            self._frame = decoded
+
+    def capture_frame(self) -> np.ndarray:
+        return self._frame
