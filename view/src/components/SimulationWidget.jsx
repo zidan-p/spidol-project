@@ -6,20 +6,18 @@
 // deliberately generative exception (docs/adr/0006): the AI returns an
 // arbitrary single-variable expression (any math that can be graphed as
 // y = f(x) -- linear, quadratic, trig, exponential, ...), evaluated via
-// mathjs (lib/functionGraph.js) and rendered by `function-plot` (a d3-based
-// library purpose-built for graphing math functions) rather than hand-
-// rolled canvas axis/curve-drawing code -- see FunctionGraphWidget.
-// `function-plot`'s `fn` option accepts a plain JS callback, so this still
-// evaluates expressions exclusively through our own sandboxed mathjs
-// compile/evaluate (never function-plot's own string parser, and never
-// `eval`/`new Function`); the library is used purely for rendering/axis-
-// scaling/zoom, not for interpreting untrusted AI output.
+// mathjs (lib/functionGraph.js) and rendered by a hand-rolled canvas (axis
+// ticks via lib/axisTicks.js) -- a `function-plot` (d3-based) integration
+// was tried first but dropped (docs/adr/0006) after it failed silently in
+// ways that couldn't be fully diagnosed without real-browser access; a
+// renderer we fully control and can actually verify end-to-end won out
+// over a nicer-looking but unverifiable third-party one.
 // All sim types have real-time parameter sliders editable via mouse. A
 // distinct "concept detected but not yet supported" state is rendered for
 // AI_WIDGET_UNSUPPORTED (and, defensively, for any AI_WIDGET_SPAWN whose
 // sim_type isn't one of these) rather than crashing or doing nothing.
-import functionPlot from 'function-plot'
 import { useEffect, useMemo, useRef, useState } from 'react'
+import { niceTicks } from '../lib/axisTicks'
 import { autoscaleY, compileExpression, sampleFunction } from '../lib/functionGraph'
 import { decimalPlacesForStep, niceStep } from '../lib/niceStep'
 import { pendulumAccel, projectileStep, rk4Step, springMassAccel } from '../lib/rk4'
@@ -230,8 +228,9 @@ function ProjectileWidget({ values }) {
 const FUNCTION_GRAPH_X_DOMAIN = 10
 
 // Evaluates `compiled` at a given x, merging in the current parameter
-// values -- shared by the live y-readout and function-plot's `fn` callback
-// so there's exactly one evaluation path, not two that could disagree.
+// values -- shared by the live y-readout and the canvas renderer's curve
+// sampling so there's exactly one evaluation path, not two that could
+// disagree.
 function evaluateAt(compiled, values, x) {
   try {
     const result = compiled.evaluate({ ...values, x })
@@ -241,31 +240,52 @@ function evaluateAt(compiled, values, x) {
   }
 }
 
-// Fallback renderer, used only if function-plot doesn't actually populate
-// the container (observed: its CJS/ESM interop behaves inconsistently
-// outside of Vite's own bundling in ad-hoc Node/jsdom repros, and without
-// real-browser access there was no way to fully confirm its runtime
-// behavior here) -- a hand-rolled canvas draw so the graph is never just
-// silently absent, only ever less polished than function-plot's own axes.
-function drawFallbackCanvas(container, points, x, y, xDomain, yMin, yMax) {
-  const canvas = document.createElement('canvas')
-  canvas.width = 260
-  canvas.height = 160
-  canvas.className = 'sim-widget-canvas'
-  container.appendChild(canvas)
+const GRAPH_MARGIN = 28 // px reserved for axis tick labels
 
+function drawFunctionGraph(canvas, { points, x, y, xDomain, yMin, yMax }) {
   const ctx = canvas.getContext('2d')
   if (!ctx) return
   const { width, height } = canvas
+  const plotLeft = GRAPH_MARGIN
+  const plotRight = width
+  const plotTop = 4
+  const plotBottom = height - GRAPH_MARGIN
+
   const toPx = (vx, vy) => [
-    ((vx + xDomain) / (2 * xDomain)) * width,
-    height - ((vy - yMin) / (yMax - yMin)) * height,
+    plotLeft + ((vx + xDomain) / (2 * xDomain)) * (plotRight - plotLeft),
+    plotBottom - ((vy - yMin) / (yMax - yMin || 1)) * (plotBottom - plotTop),
   ]
 
   ctx.clearRect(0, 0, width, height)
+  ctx.font = '9px ui-sans-serif, system-ui, sans-serif'
+  ctx.fillStyle = '#6b7280'
+
+  // Grid + tick labels, computed from the actual plotted range so they're
+  // always meaningful even as parameter sliders reshape the curve (unlike
+  // a fixed domain, which would make slider changes hard to perceive).
+  for (const tick of niceTicks(-xDomain, xDomain, 5)) {
+    const [px] = toPx(tick, 0)
+    ctx.strokeStyle = '#222'
+    ctx.beginPath()
+    ctx.moveTo(px, plotTop)
+    ctx.lineTo(px, plotBottom)
+    ctx.stroke()
+    ctx.textAlign = 'center'
+    ctx.fillText(String(tick), px, plotBottom + 12)
+  }
+  for (const tick of niceTicks(yMin, yMax, 4)) {
+    const [, py] = toPx(0, tick)
+    ctx.strokeStyle = '#222'
+    ctx.beginPath()
+    ctx.moveTo(plotLeft, py)
+    ctx.lineTo(plotRight, py)
+    ctx.stroke()
+    ctx.textAlign = 'right'
+    ctx.fillText(String(tick), plotLeft - 4, py + 3)
+  }
 
   if (yMin <= 0 && yMax >= 0) {
-    ctx.strokeStyle = '#555'
+    ctx.strokeStyle = '#6b7280'
     ctx.beginPath()
     const [axX0, axY0] = toPx(-xDomain, 0)
     const [axX1, axY1] = toPx(xDomain, 0)
@@ -275,6 +295,7 @@ function drawFallbackCanvas(container, points, x, y, xDomain, yMin, yMax) {
   }
 
   ctx.strokeStyle = '#c792ea'
+  ctx.lineWidth = 2
   ctx.beginPath()
   points.forEach((point, index) => {
     const [px, py] = toPx(point.x, point.y)
@@ -287,20 +308,17 @@ function drawFallbackCanvas(container, points, x, y, xDomain, yMin, yMax) {
     const [pointX, pointY] = toPx(x, y)
     ctx.fillStyle = '#ffd166'
     ctx.beginPath()
-    ctx.arc(pointX, pointY, 6, 0, Math.PI * 2)
+    ctx.arc(pointX, pointY, 5, 0, Math.PI * 2)
     ctx.fill()
   }
 }
 
 function FunctionGraphWidget({ expression, values }) {
   const [x, setX] = useState(0)
-  const containerRef = useRef(null)
+  const canvasRef = useRef(null)
 
   const compiled = useMemo(() => compileExpression(expression ?? ''), [expression])
 
-  // Used only to pick a sensible initial y-axis viewport (autoscaleY) --
-  // the actual curve rendering/sampling below is function-plot's own job,
-  // not this array's.
   const points = useMemo(
     () =>
       compiled
@@ -312,49 +330,26 @@ function FunctionGraphWidget({ expression, values }) {
   const y = useMemo(() => (compiled ? evaluateAt(compiled, values, x) : NaN), [compiled, values, x])
 
   useEffect(() => {
-    const container = containerRef.current
-    if (!container || !compiled) return undefined
-    container.innerHTML = ''
+    const canvas = canvasRef.current
+    if (!canvas || !compiled) return undefined
 
     const [yMin, yMax] = autoscaleY(points)
-    const data = [
-      {
-        fn: (scope) => evaluateAt(compiled, values, scope.x),
-        graphType: 'polyline',
-        color: '#c792ea',
-      },
-    ]
-    if (Number.isFinite(y)) {
-      data.push({ points: [[x, y]], fnType: 'points', graphType: 'scatter', color: '#ffd166' })
-    }
 
-    try {
-      functionPlot({
-        target: container,
-        width: 260,
-        height: 160,
-        grid: true,
-        disableZoom: true,
-        xAxis: { domain: [-FUNCTION_GRAPH_X_DOMAIN, FUNCTION_GRAPH_X_DOMAIN] },
-        yAxis: { domain: [yMin, yMax] },
-        data,
-      })
-    } catch (err) {
-      // eslint-disable-next-line no-console
-      console.error('function-plot failed to render; falling back to canvas', err)
+    // Sized to the parent card's actual available width (not a hardcoded
+    // constant) so the graph never overflows its container regardless of
+    // widget card width -- re-measured on resize since the widget is
+    // positioned with percentage offsets (SPEC.md 3.3) that can change
+    // with the viewport.
+    const draw = () => {
+      canvas.width = canvas.clientWidth
+      canvas.height = 160
+      drawFunctionGraph(canvas, { points, x, y, xDomain: FUNCTION_GRAPH_X_DOMAIN, yMin, yMax })
     }
+    draw()
 
-    // Guaranteed fallback: if function-plot didn't actually populate the
-    // container (threw above, or silently produced nothing), the graph
-    // must never just be absent -- draw it ourselves instead.
-    if (container.childElementCount === 0) {
-      drawFallbackCanvas(container, points, x, y, FUNCTION_GRAPH_X_DOMAIN, yMin, yMax)
-    }
-
-    return () => {
-      container.innerHTML = ''
-    }
-  }, [compiled, values, points, x, y])
+    window.addEventListener('resize', draw)
+    return () => window.removeEventListener('resize', draw)
+  }, [compiled, points, x, y])
 
   if (!compiled) {
     return (
@@ -366,7 +361,7 @@ function FunctionGraphWidget({ expression, values }) {
 
   return (
     <div className="sim-widget-function-graph">
-      <div ref={containerRef} className="sim-widget-function-plot" />
+      <canvas ref={canvasRef} height={160} className="sim-widget-canvas sim-widget-function-canvas" />
       <div className="sim-widget-slider-row">
         <div className="sim-widget-slider-row__header">
           <label htmlFor="sim-function-graph-x">x</label>

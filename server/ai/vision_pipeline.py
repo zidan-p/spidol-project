@@ -51,14 +51,23 @@ PROMPT_TEXT = (
     "is a plain single-variable function y = f(x) (linear, quadratic, "
     "cubic, trigonometric, exponential, logarithmic, rational, etc.), "
     "classify it as function_graph and additionally return an "
-    '"expression" field: a single-variable algebraic expression in terms '
-    "of x and your chosen parameter keys, written in standard math "
-    "notation parseable by mathjs (operators + - * / ^, functions like "
-    "sin cos tan sqrt abs exp log, constants pi e). Example: for y = "
-    'ax^2 + bx + c, return "expression": "a*x^2 + b*x + c" with '
-    'parameters keyed "a", "b", "c". Return its LaTeX, a short concept '
-    "title, and reasonable adjustable parameters with min/max/default "
-    "values for every constant that appears in the expression.\n\n"
+    '"expression" field: a single-variable algebraic expression SOLVED '
+    "FOR y, in terms of x and your chosen parameter keys, written in "
+    "standard math notation parseable by mathjs (operators + - * / ^, "
+    "functions like sin cos tan sqrt abs exp log, constants pi e). If the "
+    "handwritten formula is implicit or not already isolated for y (e.g. "
+    '"2y = 3x", "ax + by = c"), algebraically rearrange it into explicit '
+    "y = ... form before writing the expression -- never return an "
+    "expression in terms of the original un-isolated coefficients. Use "
+    "conventional names for the parameters of the SOLVED form, not the "
+    'original equation\'s coefficients: linear -> "expression": "m*x + b" '
+    'with parameters keyed "m" (slope), "b" (intercept); quadratic -> '
+    '"expression": "a*x^2 + b*x + c" with parameters keyed "a", "b", "c". '
+    "Return its LaTeX (showing the ORIGINAL handwritten form, not the "
+    "rearranged one), a short concept title, and reasonable adjustable "
+    "parameters with min/max/default values for every constant in the "
+    "SOLVED expression (x itself is never a parameter -- it's the "
+    "interactive slider the UI already provides).\n\n"
     "Respond with ONLY a single JSON object (no prose, no markdown code "
     "fence), matching exactly this shape:\n"
     '{"formula_latex": "<latex string>", "concept_title": "<short title>", '

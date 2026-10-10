@@ -147,36 +147,14 @@ body,
   border-radius: 4px;
 }
 
-/* function-plot (function_graph Simulation Type, docs/adr/0006) renders
-   its own SVG assuming a light page background by default -- these target
-   its known class names (confirmed against its own source, it ships no
-   stylesheet of its own) to match the rest of the dark widget chrome. */
-.sim-widget-function-plot {
-  min-width: 260px;
-  min-height: 160px;
-  margin: 8px 0;
-  border-radius: 4px;
-  overflow: hidden;
-  background: #0a0a0a;
-}
-
-.sim-widget-function-plot svg {
-  display: block;
-}
-
-.sim-widget-function-plot .domain,
-.sim-widget-function-plot .x.origin,
-.sim-widget-function-plot .y.origin {
-  stroke: #555;
-}
-
-.sim-widget-function-plot .tick line {
-  stroke: #2a2a2a;
-}
-
-.sim-widget-function-plot .tick text {
-  fill: var(--chrome-text-muted);
-  font-size: 9px;
+/* function_graph Simulation Type (docs/adr/0006): hand-rolled canvas, sized
+   to 100% of the card's content width so SimulationWidget.jsx's resize
+   handler (canvas.width = canvas.clientWidth) always measures the real
+   available space -- a fixed pixel width here previously overflowed the
+   card on at least one real formula. */
+.sim-widget-function-canvas {
+  width: 100%;
+  height: 160px;
 }
 
 .status-capsule__field {
