@@ -13,6 +13,7 @@
 // *position* still comes from the TRACK_UPDATE stream; only the caption
 // string itself is native keyboard input, handled by App.jsx's overlay).
 import { forwardRef, useEffect, useImperativeHandle, useRef } from 'react'
+import { useDrawSuppression } from '../hooks/useDrawSuppression'
 import { createStrokeBuffer, ingestTrackUpdate } from '../lib/strokeBuffer'
 import { strokeSegments } from '../lib/strokeGeometry'
 import { canRedo, canUndo, commitAction, createHistory, redo, undo } from '../lib/strokeHistory'
@@ -88,6 +89,7 @@ export const Canvas = forwardRef(function Canvas(
   const lastTouchStateRef = useRef(false)
   const toolRef = useRef(tool)
   const styleRef = useRef(style)
+  const suppressDrawRef = useDrawSuppression(canvasRef)
 
   toolRef.current = tool
   styleRef.current = style
@@ -155,11 +157,20 @@ export const Canvas = forwardRef(function Canvas(
       const message = latestTrackRef.current
       if (message && message !== lastSeenMessageRef.current) {
         lastSeenMessageRef.current = message
-        if (Boolean(message.is_touching) !== lastTouchStateRef.current) {
-          lastTouchStateRef.current = Boolean(message.is_touching)
+        // See useDrawSuppression: the mouse-fallback touch signal is a
+        // global OS-level listener that fires for clicks on this app's own
+        // UI chrome too (sliders, buttons, ...) -- force is_touching=false
+        // for those gestures so dragging a slider never leaves ink behind
+        // it, without otherwise altering the message (position still
+        // updates normally).
+        const effectiveMessage = suppressDrawRef.current
+          ? { ...message, is_touching: false }
+          : message
+        if (Boolean(effectiveMessage.is_touching) !== lastTouchStateRef.current) {
+          lastTouchStateRef.current = Boolean(effectiveMessage.is_touching)
           onTouchChange?.(lastTouchStateRef.current)
         }
-        const result = ingestTrackUpdate(bufferRef.current, message, styleRef.current)
+        const result = ingestTrackUpdate(bufferRef.current, effectiveMessage, styleRef.current)
         bufferRef.current = { strokes: result.strokes, activeStroke: result.activeStroke }
         if (result.lastAction) {
           historyRef.current = commitAction(historyRef.current, result.lastAction)
