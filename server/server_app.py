@@ -99,18 +99,27 @@ async def _fire_ai_trigger(
     (see this module's docstring): runs one `handle_ai_trigger` cycle and
     broadcasts the resulting widget message to every connected client.
 
-    `handle_ai_trigger` itself is synchronous (it does its own internal
-    blocking/timeout handling around the vision model call -- see ai/trigger.py),
-    so this wrapper's only job is picking the current `server.connections`
-    out of `server_box` (populated once `serve()` has started, see
-    `create_server` below) and broadcasting.
+    `handle_ai_trigger` itself is synchronous and blocking (it does its own
+    internal timeout handling around the vision model call via a
+    `ThreadPoolExecutor.result()` wait -- see ai/trigger.py / ai/
+    vision_pipeline.py). Run via `loop.run_in_executor` here so that blocking
+    wait happens on a worker thread, not this coroutine's event-loop thread
+    -- otherwise the whole server (telemetry broadcasts, every other
+    client's WebSocket handshake) freezes for the AI call's full duration
+    (observed in practice: a second browser tab's handshake failing with
+    `ConnectionClosedError` while an AI Trigger was in flight).
     """
-    widget_message = handle_ai_trigger(
-        stroke_tracker=stroke_tracker,
-        image_source=image_source,
-        vision_client=vision_client,
-        timeout_s=ai_timeout_s,
-        model=ai_model,
+    loop = asyncio.get_running_loop()
+    widget_message = await loop.run_in_executor(
+        None,
+        functools.partial(
+            handle_ai_trigger,
+            stroke_tracker=stroke_tracker,
+            image_source=image_source,
+            vision_client=vision_client,
+            timeout_s=ai_timeout_s,
+            model=ai_model,
+        ),
     )
     broadcast(server_box["server"].connections, widget_message)
 

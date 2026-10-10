@@ -11,6 +11,7 @@ fake being its own WebSocket client just to reach `handle_ai_trigger`).
 """
 import asyncio
 import json
+import time
 
 import pytest
 import websockets
@@ -46,6 +47,26 @@ class _FakeResponse:
 class _FakeClient:
     def __init__(self, response_text):
         self.chat = type("Chat", (), {"completions": _FakeCompletions(response_text)})()
+
+
+class _SlowFakeCompletions:
+    """Blocks the calling thread for `delay_s` -- simulates a real HTTP call
+    to a vision model, which is a blocking call from the perspective of
+    whatever thread invokes it.
+    """
+
+    def __init__(self, response_text, delay_s):
+        self._response_text = response_text
+        self._delay_s = delay_s
+
+    def create(self, *, model, messages, response_format):
+        time.sleep(self._delay_s)
+        return _FakeResponse(self._response_text)
+
+
+class _SlowFakeClient:
+    def __init__(self, response_text, delay_s):
+        self.chat = type("Chat", (), {"completions": _SlowFakeCompletions(response_text, delay_s)})()
 
 
 SPRING_MASS_JSON = json.dumps(
@@ -144,3 +165,42 @@ async def test_server_fire_ai_trigger_broadcasts_without_any_websocket_sender():
 
     assert message["type"] == "AI_WIDGET_SPAWN"
     assert message["sim_type"] == "spring_mass"
+
+
+@pytest.mark.asyncio
+async def test_slow_ai_trigger_does_not_block_new_connections():
+    """Regression test: a real vision-model call can easily take 1-3+
+    seconds. `handle_ai_trigger` must not block the asyncio event loop for
+    that whole duration -- if it did, no other connection could complete its
+    WebSocket handshake (or receive telemetry broadcasts) until the AI call
+    finished, which is exactly what was observed in practice (a second
+    browser tab's handshake failing with `ConnectionClosedError: no close
+    frame received or sent` while an AI Trigger was in flight).
+    """
+    port = await _free_port()
+    tracker = SystemMouseFallbackTracker(position_source=lambda: (0, 0), screen_size=(1000, 1000))
+    touch_provider = KeyboardMockProvider()
+    vision_client = _SlowFakeClient(SPRING_MASS_JSON, delay_s=1.0)
+
+    async with create_server(
+        tracker, touch_provider, host="127.0.0.1", port=port, fps=60, vision_client=vision_client
+    ) as server:
+        start = time.monotonic()
+        trigger_task = asyncio.create_task(server.fire_ai_trigger())
+        await asyncio.sleep(0.05)  # let the slow call actually start
+
+        # While the 1s-long AI call is still in flight, a brand new client
+        # must still be able to connect and receive a message quickly -- if
+        # the event loop were blocked, this would take ~1s instead (it did,
+        # before the fix: measured ~1.5s for a 1.5s-long fake call).
+        async with websockets.connect(f"ws://127.0.0.1:{port}") as new_client:
+            raw = await asyncio.wait_for(new_client.recv(), timeout=2)
+            assert json.loads(raw)["type"] == "TRACK_UPDATE"
+        elapsed = time.monotonic() - start
+
+        await trigger_task
+
+    assert elapsed < 0.5, (
+        f"new connection took {elapsed:.2f}s to connect+receive while an AI Trigger "
+        "was in flight -- the event loop is blocked by the AI call"
+    )
