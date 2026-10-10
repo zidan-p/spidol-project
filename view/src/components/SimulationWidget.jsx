@@ -6,11 +6,19 @@
 // deliberately generative exception (docs/adr/0006): the AI returns an
 // arbitrary single-variable expression (any math that can be graphed as
 // y = f(x) -- linear, quadratic, trig, exponential, ...), evaluated via
-// mathjs (lib/functionGraph.js), not a hand-written-per-formula renderer.
+// mathjs (lib/functionGraph.js) and rendered by `function-plot` (a d3-based
+// library purpose-built for graphing math functions) rather than hand-
+// rolled canvas axis/curve-drawing code -- see FunctionGraphWidget.
+// `function-plot`'s `fn` option accepts a plain JS callback, so this still
+// evaluates expressions exclusively through our own sandboxed mathjs
+// compile/evaluate (never function-plot's own string parser, and never
+// `eval`/`new Function`); the library is used purely for rendering/axis-
+// scaling/zoom, not for interpreting untrusted AI output.
 // All sim types have real-time parameter sliders editable via mouse. A
 // distinct "concept detected but not yet supported" state is rendered for
 // AI_WIDGET_UNSUPPORTED (and, defensively, for any AI_WIDGET_SPAWN whose
 // sim_type isn't one of these) rather than crashing or doing nothing.
+import functionPlot from 'function-plot'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { autoscaleY, compileExpression, sampleFunction } from '../lib/functionGraph'
 import { decimalPlacesForStep, niceStep } from '../lib/niceStep'
@@ -221,12 +229,27 @@ function ProjectileWidget({ values }) {
 // rendered in `SimulationWidget`.
 const FUNCTION_GRAPH_X_DOMAIN = 10
 
+// Evaluates `compiled` at a given x, merging in the current parameter
+// values -- shared by the live y-readout and function-plot's `fn` callback
+// so there's exactly one evaluation path, not two that could disagree.
+function evaluateAt(compiled, values, x) {
+  try {
+    const result = compiled.evaluate({ ...values, x })
+    return Number.isFinite(result) ? result : NaN
+  } catch {
+    return NaN
+  }
+}
+
 function FunctionGraphWidget({ expression, values }) {
   const [x, setX] = useState(0)
-  const canvasRef = useRef(null)
+  const containerRef = useRef(null)
 
   const compiled = useMemo(() => compileExpression(expression ?? ''), [expression])
 
+  // Used only to pick a sensible initial y-axis viewport (autoscaleY) --
+  // the actual curve rendering/sampling below is function-plot's own job,
+  // not this array's.
   const points = useMemo(
     () =>
       compiled
@@ -235,58 +258,47 @@ function FunctionGraphWidget({ expression, values }) {
     [compiled, values]
   )
 
-  const y = useMemo(() => {
-    if (!compiled) return NaN
-    try {
-      const result = compiled.evaluate({ ...values, x })
-      return Number.isFinite(result) ? result : NaN
-    } catch {
-      return NaN
-    }
-  }, [compiled, values, x])
+  const y = useMemo(() => (compiled ? evaluateAt(compiled, values, x) : NaN), [compiled, values, x])
 
   useEffect(() => {
-    const canvas = canvasRef.current
-    if (!canvas) return
-    const ctx = canvas.getContext && canvas.getContext('2d')
-    if (!ctx) return
-    const { width, height } = canvas
-    const xDomain = FUNCTION_GRAPH_X_DOMAIN
+    const container = containerRef.current
+    if (!container || !compiled) return undefined
+    container.innerHTML = ''
+
     const [yMin, yMax] = autoscaleY(points)
-    const toPx = (vx, vy) => [
-      ((vx + xDomain) / (2 * xDomain)) * width,
-      height - ((vy - yMin) / (yMax - yMin)) * height,
+    const data = [
+      {
+        fn: (scope) => evaluateAt(compiled, values, scope.x),
+        graphType: 'polyline',
+        color: '#c792ea',
+      },
     ]
-
-    ctx.clearRect(0, 0, width, height)
-
-    if (yMin <= 0 && yMax >= 0) {
-      ctx.strokeStyle = '#555'
-      ctx.beginPath()
-      const [axX0, axY0] = toPx(-xDomain, 0)
-      const [axX1, axY1] = toPx(xDomain, 0)
-      ctx.moveTo(axX0, axY0)
-      ctx.lineTo(axX1, axY1)
-      ctx.stroke()
-    }
-
-    ctx.strokeStyle = '#c792ea'
-    ctx.beginPath()
-    points.forEach((point, index) => {
-      const [px, py] = toPx(point.x, point.y)
-      if (index === 0) ctx.moveTo(px, py)
-      else ctx.lineTo(px, py)
-    })
-    ctx.stroke()
-
     if (Number.isFinite(y)) {
-      const [pointX, pointY] = toPx(x, y)
-      ctx.fillStyle = '#ffd166'
-      ctx.beginPath()
-      ctx.arc(pointX, pointY, 6, 0, Math.PI * 2)
-      ctx.fill()
+      data.push({ points: [[x, y]], fnType: 'points', graphType: 'scatter', color: '#ffd166' })
     }
-  }, [points, x, y])
+
+    try {
+      functionPlot({
+        target: container,
+        width: 260,
+        height: 160,
+        grid: true,
+        disableZoom: true,
+        xAxis: { domain: [-FUNCTION_GRAPH_X_DOMAIN, FUNCTION_GRAPH_X_DOMAIN] },
+        yAxis: { domain: [yMin, yMax] },
+        data,
+      })
+    } catch {
+      // jsdom (component tests) and a handful of real pathological domains
+      // (e.g. a degenerate y-range) can make function-plot's underlying d3
+      // calls throw -- leave the container empty rather than crash the
+      // widget; see ticket 03's precedent for canvas rendering not being
+      // unit-tested in jsdom for the same underlying reason.
+    }
+    return () => {
+      container.innerHTML = ''
+    }
+  }, [compiled, values, points, x, y])
 
   if (!compiled) {
     return (
@@ -298,7 +310,7 @@ function FunctionGraphWidget({ expression, values }) {
 
   return (
     <div className="sim-widget-function-graph">
-      <canvas ref={canvasRef} width={240} height={160} className="sim-widget-canvas" />
+      <div ref={containerRef} className="sim-widget-function-plot" />
       <div className="sim-widget-slider-row">
         <div className="sim-widget-slider-row__header">
           <label htmlFor="sim-function-graph-x">x</label>

@@ -98,7 +98,12 @@ describe('SimulationWidget', () => {
     }
     const { container } = render(<SimulationWidget widget={linearFunction} />)
 
-    expect(container.querySelector('canvas')).toBeTruthy()
+    // function-plot renders into this container (a <svg>, not a <canvas>);
+    // jsdom can't fully execute its d3 internals (see FunctionGraphWidget's
+    // try/catch), so only the container's presence is asserted here --
+    // the actual curve rendering isn't unit-tested, consistent with this
+    // project's existing canvas-rendering precedent.
+    expect(container.querySelector('.sim-widget-function-plot')).toBeTruthy()
     expect(screen.getByLabelText('Slope (m)')).toHaveValue('2')
     expect(screen.getByLabelText('Intercept (b)')).toHaveValue('0')
 

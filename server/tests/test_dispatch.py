@@ -31,11 +31,32 @@ def test_recognized_simulation_type_builds_ai_widget_spawn():
         "formula_latex": "F = -kx",
         "title": "Spring-Mass Harmonic Oscillation",
         "sim_type": "spring_mass",
+        "expression": None,
         "parameters": [
             {"key": "k", "label": "Spring Stiffness (N/m)", "min": 10, "max": 100, "val": 45},
             {"key": "m", "label": "Bob Mass (kg)", "min": 0.5, "max": 5.0, "val": 1.2},
         ],
     }
+
+
+def test_function_graph_spawn_includes_the_expression_field():
+    analysis = FormulaAnalysis(
+        formula_latex="y = ax^2 + bx + c",
+        concept_title="Quadratic Function",
+        simulation_type="function_graph",
+        expression="a*x^2 + b*x + c",
+        parameters=[
+            Parameter(key="a", label="a", min=-5, max=5, val=1),
+            Parameter(key="b", label="b", min=-10, max=10, val=0),
+            Parameter(key="c", label="c", min=-10, max=10, val=0),
+        ],
+    )
+
+    raw = build_widget_message(analysis, widget_id="widget_03", anchor_x=0.4, anchor_y=0.2)
+    payload = json.loads(raw)
+
+    assert payload["type"] == "AI_WIDGET_SPAWN"
+    assert payload["expression"] == "a*x^2 + b*x + c"
 
 
 def test_unrecognized_simulation_type_builds_ai_widget_unsupported():
