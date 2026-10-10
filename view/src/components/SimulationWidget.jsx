@@ -241,6 +241,57 @@ function evaluateAt(compiled, values, x) {
   }
 }
 
+// Fallback renderer, used only if function-plot doesn't actually populate
+// the container (observed: its CJS/ESM interop behaves inconsistently
+// outside of Vite's own bundling in ad-hoc Node/jsdom repros, and without
+// real-browser access there was no way to fully confirm its runtime
+// behavior here) -- a hand-rolled canvas draw so the graph is never just
+// silently absent, only ever less polished than function-plot's own axes.
+function drawFallbackCanvas(container, points, x, y, xDomain, yMin, yMax) {
+  const canvas = document.createElement('canvas')
+  canvas.width = 260
+  canvas.height = 160
+  canvas.className = 'sim-widget-canvas'
+  container.appendChild(canvas)
+
+  const ctx = canvas.getContext('2d')
+  if (!ctx) return
+  const { width, height } = canvas
+  const toPx = (vx, vy) => [
+    ((vx + xDomain) / (2 * xDomain)) * width,
+    height - ((vy - yMin) / (yMax - yMin)) * height,
+  ]
+
+  ctx.clearRect(0, 0, width, height)
+
+  if (yMin <= 0 && yMax >= 0) {
+    ctx.strokeStyle = '#555'
+    ctx.beginPath()
+    const [axX0, axY0] = toPx(-xDomain, 0)
+    const [axX1, axY1] = toPx(xDomain, 0)
+    ctx.moveTo(axX0, axY0)
+    ctx.lineTo(axX1, axY1)
+    ctx.stroke()
+  }
+
+  ctx.strokeStyle = '#c792ea'
+  ctx.beginPath()
+  points.forEach((point, index) => {
+    const [px, py] = toPx(point.x, point.y)
+    if (index === 0) ctx.moveTo(px, py)
+    else ctx.lineTo(px, py)
+  })
+  ctx.stroke()
+
+  if (Number.isFinite(y)) {
+    const [pointX, pointY] = toPx(x, y)
+    ctx.fillStyle = '#ffd166'
+    ctx.beginPath()
+    ctx.arc(pointX, pointY, 6, 0, Math.PI * 2)
+    ctx.fill()
+  }
+}
+
 function FunctionGraphWidget({ expression, values }) {
   const [x, setX] = useState(0)
   const containerRef = useRef(null)
@@ -288,13 +339,18 @@ function FunctionGraphWidget({ expression, values }) {
         yAxis: { domain: [yMin, yMax] },
         data,
       })
-    } catch {
-      // jsdom (component tests) and a handful of real pathological domains
-      // (e.g. a degenerate y-range) can make function-plot's underlying d3
-      // calls throw -- leave the container empty rather than crash the
-      // widget; see ticket 03's precedent for canvas rendering not being
-      // unit-tested in jsdom for the same underlying reason.
+    } catch (err) {
+      // eslint-disable-next-line no-console
+      console.error('function-plot failed to render; falling back to canvas', err)
     }
+
+    // Guaranteed fallback: if function-plot didn't actually populate the
+    // container (threw above, or silently produced nothing), the graph
+    // must never just be absent -- draw it ourselves instead.
+    if (container.childElementCount === 0) {
+      drawFallbackCanvas(container, points, x, y, FUNCTION_GRAPH_X_DOMAIN, yMin, yMax)
+    }
+
     return () => {
       container.innerHTML = ''
     }
