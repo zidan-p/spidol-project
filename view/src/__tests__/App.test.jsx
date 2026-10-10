@@ -53,6 +53,43 @@ describe('App AI Trigger dev-mode hook', () => {
     ])
   })
 
+  it('sends an AI_TRIGGER message when the Analyze button is clicked', () => {
+    render(<App />)
+    const socket = FakeWebSocket.instances[0]
+
+    fireEvent.click(screen.getByRole('button', { name: /analyze/i }))
+
+    expect(socket.sent).toEqual([
+      JSON.stringify({ type: 'AI_TRIGGER', image_png_base64: null }),
+    ])
+  })
+
+  it('shows a processing indicator after triggering, and clears it once a widget arrives', () => {
+    render(<App />)
+    const socket = FakeWebSocket.instances[0]
+
+    expect(screen.queryByRole('status')).not.toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole('button', { name: /analyze/i }))
+
+    expect(screen.getByRole('status')).toHaveTextContent(/analyzing/i)
+
+    act(() => {
+      socket.simulateMessage({
+        type: 'AI_WIDGET_SPAWN',
+        widget_id: 'widget_01',
+        anchor_x: 0.5,
+        anchor_y: 0.3,
+        formula_latex: 'F = -kx',
+        title: 'Spring-Mass Harmonic Oscillation',
+        sim_type: 'spring_mass',
+        parameters: [{ key: 'k', label: 'Spring Stiffness (N/m)', min: 10, max: 100, val: 45 }],
+      })
+    })
+
+    expect(screen.queryByRole('status')).not.toBeInTheDocument()
+  })
+
   it('renders a SimulationWidget when AI_WIDGET_SPAWN arrives', () => {
     render(<App />)
     const socket = FakeWebSocket.instances[0]

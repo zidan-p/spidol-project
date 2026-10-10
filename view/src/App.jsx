@@ -18,6 +18,7 @@
 // button additionally sends {"type": "CANVAS_CLEAR"} so the server-side AI
 // Trigger Region (StrokeRegionTracker) resets in lockstep with the local
 // canvas clear.
+import { Loader2, Maximize2, Minimize2, Redo2, Sparkles, Trash2, Undo2 } from 'lucide-react'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { Canvas } from './components/Canvas'
 import { PropertySidebar } from './components/PropertySidebar'
@@ -29,6 +30,14 @@ import { useKioskMode } from './hooks/useKioskMode'
 import { useSpidolSocket } from './hooks/useSpidolSocket'
 import { useUndoRedoHotkeys } from './hooks/useUndoRedoHotkeys'
 import './styles/excalidraw.css'
+
+// Safety upper bound on the processing indicator: the server always
+// eventually broadcasts something (a real analysis or the Cached Fallback
+// Schema) on every AI Trigger, but if the WebSocket itself drops mid-call
+// there'd otherwise be no signal to clear it -- this is strictly larger
+// than the server's own AI_TIMEOUT_S default so it never fires first in
+// the normal case.
+const AI_PROCESSING_SAFETY_TIMEOUT_MS = 30000
 
 const WEBSOCKET_URL = `ws://${window.location.hostname}:8765`
 const AI_TRIGGER_KEY = 't'
@@ -47,6 +56,8 @@ function App() {
   const [history, setHistory] = useState({ canUndo: false, canRedo: false })
   const [pendingText, setPendingText] = useState(null) // { x, y } in normalized 0..1 canvas coords
   const [isTouching, setIsTouching] = useState(false)
+  const [isAiProcessing, setIsAiProcessing] = useState(false)
+  const aiProcessingTimeoutRef = useRef(null)
 
   const { isBlackout } = useBlackoutMode()
   const { isKiosk, toggleKiosk } = useKioskMode()
@@ -73,16 +84,41 @@ function App() {
     setPendingText(null)
   }
 
+  const handleAiTrigger = useCallback(() => {
+    // Sends the current canvas pixels along with the trigger so the
+    // server's BrowserCanvasImageSource has a real frame to crop in
+    // mouse-fallback dev mode (no real camera) -- see Canvas.jsx's
+    // exportPngBase64 and server_app.py's AI_TRIGGER handler.
+    const image_png_base64 = canvasRef.current?.exportPngBase64() ?? null
+    sendMessage({ type: 'AI_TRIGGER', image_png_base64 })
+
+    setIsAiProcessing(true)
+    clearTimeout(aiProcessingTimeoutRef.current)
+    aiProcessingTimeoutRef.current = setTimeout(
+      () => setIsAiProcessing(false),
+      AI_PROCESSING_SAFETY_TIMEOUT_MS
+    )
+  }, [sendMessage])
+
+  // Clears the processing indicator as soon as any widget (recognized or
+  // AI_WIDGET_UNSUPPORTED) arrives -- the server always eventually responds
+  // to an AI Trigger with one or the other. Adjusted directly during render
+  // (React's recommended pattern for "state derived from this component's
+  // own state changing"), not in a useEffect -- an effect here would
+  // trigger an extra cascading render for no benefit. The safety timeout
+  // (above) is left to fire on its own schedule; calling setIsAiProcessing
+  // (false) again once it's already false is a harmless no-op.
+  const [lastWidgetCount, setLastWidgetCount] = useState(widgets.length)
+  if (widgets.length !== lastWidgetCount) {
+    setLastWidgetCount(widgets.length)
+    if (isAiProcessing) setIsAiProcessing(false)
+  }
+
   useEffect(() => {
     const onKeyDown = (event) => {
       const key = event.key.toLowerCase()
       if (key === AI_TRIGGER_KEY) {
-        // Sends the current canvas pixels along with the trigger so the
-        // server's BrowserCanvasImageSource has a real frame to crop in
-        // mouse-fallback dev mode (no real camera) -- see Canvas.jsx's
-        // exportPngBase64 and server_app.py's AI_TRIGGER handler.
-        const image_png_base64 = canvasRef.current?.exportPngBase64() ?? null
-        sendMessage({ type: 'AI_TRIGGER', image_png_base64 })
+        handleAiTrigger()
       } else if (key === CALIBRATE_KEY) {
         // Calibration Hotkey (GLOSSARY.md): manual, operator-triggered
         // re-run of the 4-point homography calibration -- never automatic
@@ -95,7 +131,7 @@ function App() {
     }
     window.addEventListener('keydown', onKeyDown)
     return () => window.removeEventListener('keydown', onKeyDown)
-  }, [sendMessage])
+  }, [handleAiTrigger, sendMessage])
 
   // Camera (ticket 02) and the BLE touch provider (ticket 05) don't exist
   // yet. Touch state is already available today from the TRACK_UPDATE
@@ -121,17 +157,44 @@ function App() {
             onDashChange={setDash}
           />
           <StatusCapsule connectionState={connectionState} camera={camera} touch={touch} />
+          {isAiProcessing && (
+            <div className="ai-processing-banner" role="status">
+              <Loader2 className="ai-processing-banner__spinner" aria-hidden="true" size={16} />
+              Analyzing your drawing…
+            </div>
+          )}
           <div className="hud hud--bottom-left">
             <button type="button" onClick={handleUndo} disabled={!history.canUndo}>
+              <Undo2 size={16} aria-hidden="true" />
               Undo
             </button>
             <button type="button" onClick={handleRedo} disabled={!history.canRedo}>
+              <Redo2 size={16} aria-hidden="true" />
               Redo
             </button>
             <button type="button" onClick={handleClear}>
+              <Trash2 size={16} aria-hidden="true" />
               Clear
             </button>
+            <button
+              type="button"
+              className="hud__ai-trigger"
+              onClick={handleAiTrigger}
+              disabled={isAiProcessing}
+            >
+              {isAiProcessing ? (
+                <Loader2 size={16} aria-hidden="true" className="spin" />
+              ) : (
+                <Sparkles size={16} aria-hidden="true" />
+              )}
+              {isAiProcessing ? 'Analyzing…' : 'Analyze drawing'}
+            </button>
             <button type="button" onClick={toggleKiosk}>
+              {isKiosk ? (
+                <Minimize2 size={16} aria-hidden="true" />
+              ) : (
+                <Maximize2 size={16} aria-hidden="true" />
+              )}
               {isKiosk ? 'Exit kiosk' : 'Enter kiosk'}
             </button>
           </div>

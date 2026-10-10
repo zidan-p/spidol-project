@@ -9,6 +9,7 @@
 // sim_type somehow isn't one of the four fixed renderers) rather than
 // crashing or doing nothing.
 import { useEffect, useRef, useState } from 'react'
+import { decimalPlacesForStep, niceStep } from '../lib/niceStep'
 import { pendulumAccel, projectileStep, rk4Step, springMassAccel } from '../lib/rk4'
 
 const SUPPORTED_SIM_TYPES = new Set(['spring_mass', 'pendulum', 'projectile', 'linear_function'])
@@ -24,21 +25,31 @@ function parametersToState(parameters) {
 function ParameterSliders({ parameters, values, onChange }) {
   return (
     <div className="sim-widget-sliders">
-      {parameters.map((param) => (
-        <div className="sim-widget-slider-row" key={param.key}>
-          <label htmlFor={`sim-param-${param.key}`}>{param.label}</label>
-          <input
-            id={`sim-param-${param.key}`}
-            type="range"
-            min={param.min}
-            max={param.max}
-            step={(param.max - param.min) / 200 || 1}
-            value={values[param.key]}
-            onChange={(event) => onChange(param.key, Number(event.target.value))}
-          />
-          <span data-testid={`param-value-${param.key}`}>{values[param.key]}</span>
-        </div>
-      ))}
+      {parameters.map((param) => {
+        // A "nice" (1/2/5 x 10^n) step instead of the raw (max-min)/200:
+        // that produced awkward steps like 0.45, so dragging the slider
+        // drifted unpredictably between clean integers and long decimal
+        // tails. See lib/niceStep.js.
+        const step = niceStep(param.min, param.max)
+        const decimals = decimalPlacesForStep(step)
+        return (
+          <div className="sim-widget-slider-row" key={param.key}>
+            <label htmlFor={`sim-param-${param.key}`}>{param.label}</label>
+            <input
+              id={`sim-param-${param.key}`}
+              type="range"
+              min={param.min}
+              max={param.max}
+              step={step}
+              value={values[param.key]}
+              onChange={(event) =>
+                onChange(param.key, Number(Number(event.target.value).toFixed(decimals)))
+              }
+            />
+            <span data-testid={`param-value-${param.key}`}>{values[param.key]}</span>
+          </div>
+        )
+      })}
     </div>
   )
 }
