@@ -101,6 +101,11 @@ body,
   color: #fbbf24;
 }
 
+.sim-widget-function-graph-error {
+  color: #fbbf24;
+  font-size: 13px;
+}
+
 .sim-widget-formula {
   font-family: ui-monospace, Consolas, monospace;
   margin: 6px 0;

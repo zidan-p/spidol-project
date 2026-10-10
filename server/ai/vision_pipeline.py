@@ -46,16 +46,25 @@ _MARKDOWN_FENCE_RE = re.compile(r"^```(?:json)?\s*(.*?)\s*```$", re.DOTALL)
 
 PROMPT_TEXT = (
     "Extract the handwritten physics/math formula in this image. "
-    "Classify it as one of: spring_mass, pendulum, projectile, "
-    "linear_function -- or, if it doesn't match any of those, your best "
-    "short snake_case label for the concept. Return its LaTeX, a short "
-    "concept title, and reasonable adjustable parameters with min/max/"
-    "default values. For linear_function (y = m*x + b), return exactly two "
-    "parameters keyed \"m\" (slope) and \"b\" (intercept).\n\n"
+    "Classify it as one of: spring_mass, pendulum, projectile (real "
+    "time-evolving physics simulations) -- or, for ANY other formula that "
+    "is a plain single-variable function y = f(x) (linear, quadratic, "
+    "cubic, trigonometric, exponential, logarithmic, rational, etc.), "
+    "classify it as function_graph and additionally return an "
+    '"expression" field: a single-variable algebraic expression in terms '
+    "of x and your chosen parameter keys, written in standard math "
+    "notation parseable by mathjs (operators + - * / ^, functions like "
+    "sin cos tan sqrt abs exp log, constants pi e). Example: for y = "
+    'ax^2 + bx + c, return "expression": "a*x^2 + b*x + c" with '
+    'parameters keyed "a", "b", "c". Return its LaTeX, a short concept '
+    "title, and reasonable adjustable parameters with min/max/default "
+    "values for every constant that appears in the expression.\n\n"
     "Respond with ONLY a single JSON object (no prose, no markdown code "
     "fence), matching exactly this shape:\n"
     '{"formula_latex": "<latex string>", "concept_title": "<short title>", '
     '"simulation_type": "<snake_case label>", '
+    '"expression": "<mathjs expression or null for spring_mass/pendulum/'
+    'projectile>", '
     '"parameters": [{"key": "<param key>", "label": "<display label>", '
     '"min": <number>, "max": <number>, "val": <number>}, ...]}'
 )
@@ -80,7 +89,14 @@ class SimulationType(str, Enum):
     SPRING_MASS = "spring_mass"
     PENDULUM = "pendulum"
     PROJECTILE = "projectile"
-    LINEAR_FUNCTION = "linear_function"
+    # Generic: any single-variable y = f(x) math function (linear,
+    # quadratic, cubic, trig, exponential, ...), not a fixed per-formula
+    # renderer -- see FormulaAnalysis.expression and
+    # view/src/components/SimulationWidget.jsx's FunctionGraphWidget, which
+    # evaluates it via mathjs rather than a hand-written RK4 integrator
+    # (there's no ODE here, just algebra). docs/adr/0006 records why this
+    # one type is generative where the other three deliberately aren't.
+    FUNCTION_GRAPH = "function_graph"
 
 
 def is_supported_simulation_type(value: str) -> bool:
@@ -106,6 +122,12 @@ class FormulaAnalysis(BaseModel):
     # enum check happens explicitly, after parsing, via
     # `is_supported_simulation_type`.
     simulation_type: str
+    # Only meaningful (non-None) for simulation_type == "function_graph": a
+    # mathjs-parseable expression in terms of `x` and the returned
+    # `parameters` keys. None for spring_mass/pendulum/projectile, whose
+    # behavior is fully determined by their hand-written RK4 integrators
+    # and don't have (or need) an algebraic expression.
+    expression: str | None = None
     parameters: list[Parameter]
 
 

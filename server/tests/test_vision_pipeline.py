@@ -9,6 +9,7 @@ API key is available in this environment. The real OpenAI-compatible call
 path exists in `_call_model` / `make_live_client` but is only exercised by a
 fake client in this test suite.
 """
+import json
 import time
 
 import pytest
@@ -108,7 +109,7 @@ def test_no_client_configured_falls_back_to_cached_schema_without_crashing():
     assert result == CACHED_FALLBACK_SCHEMA
 
 
-@pytest.mark.parametrize("sim_type", ["spring_mass", "pendulum", "projectile", "linear_function"])
+@pytest.mark.parametrize("sim_type", ["spring_mass", "pendulum", "projectile", "function_graph"])
 def test_recognized_simulation_types(sim_type):
     assert is_supported_simulation_type(sim_type) is True
 
@@ -181,6 +182,35 @@ def test_requests_json_object_mode_not_strict_json_schema():
     analyze_formula_crop(b"fake-png-bytes", _RecordingClient(), timeout_s=3.0)
 
     assert seen["response_format"] == {"type": "json_object"}
+
+
+def test_function_graph_response_carries_the_expression_field():
+    body = json.dumps(
+        {
+            "formula_latex": "y = ax^2 + bx + c",
+            "concept_title": "Quadratic Function",
+            "simulation_type": "function_graph",
+            "expression": "a*x^2 + b*x + c",
+            "parameters": [
+                {"key": "a", "label": "a", "min": -5, "max": 5, "val": 1},
+                {"key": "b", "label": "b", "min": -10, "max": 10, "val": 0},
+                {"key": "c", "label": "c", "min": -10, "max": 10, "val": 0},
+            ],
+        }
+    )
+    client = _FakeClient(response_text=body)
+
+    result = analyze_formula_crop(b"fake-png-bytes", client, timeout_s=3.0)
+
+    assert result.simulation_type == "function_graph"
+    assert result.expression == "a*x^2 + b*x + c"
+    assert is_supported_simulation_type(result.simulation_type) is True
+
+
+def test_expression_defaults_to_none_when_absent():
+    result = analyze_formula_crop(b"fake-png-bytes", _FakeClient(response_text=SPRING_MASS_JSON), timeout_s=3.0)
+
+    assert result.expression is None
 
 
 def test_passes_requested_model_through_to_the_client():

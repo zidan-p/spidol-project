@@ -1,18 +1,22 @@
-// Fixed-enum physics/math widget (SPEC.md 3.3 Simulation Widgets,
-// GLOSSARY.md: Simulation Type). spring_mass/pendulum/projectile are each
-// rendered by their own hand-written RK4 integrator (no general physics
-// library, see lib/rk4.js); linear_function is pure algebra (no RK4, see
-// LinearFunctionWidget) with an interactive x slider instead of time-based
-// animation. All four have real-time parameter sliders editable via mouse.
-// A distinct "concept detected but not yet supported" state is rendered for
+// Simulation Type widget (SPEC.md 3.3 Simulation Widgets, GLOSSARY.md:
+// Simulation Type). spring_mass/pendulum/projectile are real time-evolving
+// physics simulations, each rendered by its own hand-written RK4
+// integrator (no general physics library, see lib/rk4.js) -- these stay a
+// fixed, closed set (docs/adr/0004). function_graph is the one
+// deliberately generative exception (docs/adr/0006): the AI returns an
+// arbitrary single-variable expression (any math that can be graphed as
+// y = f(x) -- linear, quadratic, trig, exponential, ...), evaluated via
+// mathjs (lib/functionGraph.js), not a hand-written-per-formula renderer.
+// All sim types have real-time parameter sliders editable via mouse. A
+// distinct "concept detected but not yet supported" state is rendered for
 // AI_WIDGET_UNSUPPORTED (and, defensively, for any AI_WIDGET_SPAWN whose
-// sim_type somehow isn't one of the four fixed renderers) rather than
-// crashing or doing nothing.
-import { useEffect, useRef, useState } from 'react'
+// sim_type isn't one of these) rather than crashing or doing nothing.
+import { useEffect, useMemo, useRef, useState } from 'react'
+import { autoscaleY, compileExpression, sampleFunction } from '../lib/functionGraph'
 import { decimalPlacesForStep, niceStep } from '../lib/niceStep'
 import { pendulumAccel, projectileStep, rk4Step, springMassAccel } from '../lib/rk4'
 
-const SUPPORTED_SIM_TYPES = new Set(['spring_mass', 'pendulum', 'projectile', 'linear_function'])
+const SUPPORTED_SIM_TYPES = new Set(['spring_mass', 'pendulum', 'projectile', 'function_graph'])
 
 function parametersToState(parameters) {
   const state = {}
@@ -206,20 +210,40 @@ function ProjectileWidget({ values }) {
   return <canvas ref={canvasRef} width={240} height={160} className="sim-widget-canvas" />
 }
 
-// Linear Function (y = m*x + b) isn't a differential equation -- no RK4
-// integrator applies here, just algebra -- so instead of animating over
-// time like the physics widgets above, it's a static line plot with an
-// interactive `x` slider (local UI state, not one of the AI-returned
-// `parameters`) that moves a point along the line and shows the live y
-// value. The `m`/`b` sliders from `parameters` still reshape the line
-// itself via the shared `ParameterSliders` rendered in `SimulationWidget`.
-const LINEAR_FUNCTION_DOMAIN = 10
+// function_graph (any y = f(x): linear, quadratic, trig, exponential, ...)
+// isn't a differential equation -- no RK4 integrator applies, just
+// algebra -- so instead of animating over time like the physics widgets
+// above, it's a static curve plot (lib/functionGraph.js evaluates
+// `expression` via mathjs) with an interactive `x` slider (local UI state,
+// not one of the AI-returned `parameters`) that moves a point along the
+// curve and shows the live y value. The non-x `parameters` (e.g. a/b/c for
+// a quadratic) still reshape the curve via the shared `ParameterSliders`
+// rendered in `SimulationWidget`.
+const FUNCTION_GRAPH_X_DOMAIN = 10
 
-function LinearFunctionWidget({ values }) {
-  const { m, b } = values
+function FunctionGraphWidget({ expression, values }) {
   const [x, setX] = useState(0)
-  const y = m * x + b
   const canvasRef = useRef(null)
+
+  const compiled = useMemo(() => compileExpression(expression ?? ''), [expression])
+
+  const points = useMemo(
+    () =>
+      compiled
+        ? sampleFunction(compiled, values, -FUNCTION_GRAPH_X_DOMAIN, FUNCTION_GRAPH_X_DOMAIN)
+        : [],
+    [compiled, values]
+  )
+
+  const y = useMemo(() => {
+    if (!compiled) return NaN
+    try {
+      const result = compiled.evaluate({ ...values, x })
+      return Number.isFinite(result) ? result : NaN
+    } catch {
+      return NaN
+    }
+  }, [compiled, values, x])
 
   useEffect(() => {
     const canvas = canvasRef.current
@@ -227,54 +251,66 @@ function LinearFunctionWidget({ values }) {
     const ctx = canvas.getContext && canvas.getContext('2d')
     if (!ctx) return
     const { width, height } = canvas
-    const domain = LINEAR_FUNCTION_DOMAIN
+    const xDomain = FUNCTION_GRAPH_X_DOMAIN
+    const [yMin, yMax] = autoscaleY(points)
     const toPx = (vx, vy) => [
-      (vx + domain) * (width / (2 * domain)),
-      height - (vy + domain) * (height / (2 * domain)),
+      ((vx + xDomain) / (2 * xDomain)) * width,
+      height - ((vy - yMin) / (yMax - yMin)) * height,
     ]
 
     ctx.clearRect(0, 0, width, height)
 
-    ctx.strokeStyle = '#555'
-    ctx.beginPath()
-    const [axX0, axY0] = toPx(-domain, 0)
-    const [axX1, axY1] = toPx(domain, 0)
-    ctx.moveTo(axX0, axY0)
-    ctx.lineTo(axX1, axY1)
-    const [ayX0, ayY0] = toPx(0, -domain)
-    const [ayX1, ayY1] = toPx(0, domain)
-    ctx.moveTo(ayX0, ayY0)
-    ctx.lineTo(ayX1, ayY1)
-    ctx.stroke()
+    if (yMin <= 0 && yMax >= 0) {
+      ctx.strokeStyle = '#555'
+      ctx.beginPath()
+      const [axX0, axY0] = toPx(-xDomain, 0)
+      const [axX1, axY1] = toPx(xDomain, 0)
+      ctx.moveTo(axX0, axY0)
+      ctx.lineTo(axX1, axY1)
+      ctx.stroke()
+    }
 
     ctx.strokeStyle = '#c792ea'
     ctx.beginPath()
-    const [lineX0, lineY0] = toPx(-domain, m * -domain + b)
-    const [lineX1, lineY1] = toPx(domain, m * domain + b)
-    ctx.moveTo(lineX0, lineY0)
-    ctx.lineTo(lineX1, lineY1)
+    points.forEach((point, index) => {
+      const [px, py] = toPx(point.x, point.y)
+      if (index === 0) ctx.moveTo(px, py)
+      else ctx.lineTo(px, py)
+    })
     ctx.stroke()
 
-    const [pointX, pointY] = toPx(x, y)
-    ctx.fillStyle = '#ffd166'
-    ctx.beginPath()
-    ctx.arc(pointX, pointY, 6, 0, Math.PI * 2)
-    ctx.fill()
-  }, [m, b, x, y])
+    if (Number.isFinite(y)) {
+      const [pointX, pointY] = toPx(x, y)
+      ctx.fillStyle = '#ffd166'
+      ctx.beginPath()
+      ctx.arc(pointX, pointY, 6, 0, Math.PI * 2)
+      ctx.fill()
+    }
+  }, [points, x, y])
+
+  if (!compiled) {
+    return (
+      <div className="sim-widget-function-graph-error">
+        Couldn't render this function — the AI's expression didn't parse.
+      </div>
+    )
+  }
 
   return (
-    <div className="sim-widget-linear-function">
+    <div className="sim-widget-function-graph">
       <canvas ref={canvasRef} width={240} height={160} className="sim-widget-canvas" />
       <div className="sim-widget-slider-row">
         <div className="sim-widget-slider-row__header">
-          <label htmlFor="sim-linear-function-x">x</label>
-          <span data-testid="linear-function-y-value">y = {y.toFixed(2)}</span>
+          <label htmlFor="sim-function-graph-x">x</label>
+          <span data-testid="function-graph-y-value">
+            y = {Number.isFinite(y) ? y.toFixed(2) : 'undefined'}
+          </span>
         </div>
         <input
-          id="sim-linear-function-x"
+          id="sim-function-graph-x"
           type="range"
-          min={-LINEAR_FUNCTION_DOMAIN}
-          max={LINEAR_FUNCTION_DOMAIN}
+          min={-FUNCTION_GRAPH_X_DOMAIN}
+          max={FUNCTION_GRAPH_X_DOMAIN}
           step={0.1}
           value={x}
           onChange={(event) => setX(Number(event.target.value))}
@@ -284,7 +320,7 @@ function LinearFunctionWidget({ values }) {
   )
 }
 
-function SimulationCanvas({ simType, values }) {
+function SimulationCanvas({ simType, values, expression }) {
   switch (simType) {
     case 'spring_mass':
       return <SpringMassWidget values={values} />
@@ -292,8 +328,8 @@ function SimulationCanvas({ simType, values }) {
       return <PendulumWidget values={values} />
     case 'projectile':
       return <ProjectileWidget values={values} />
-    case 'linear_function':
-      return <LinearFunctionWidget values={values} />
+    case 'function_graph':
+      return <FunctionGraphWidget expression={expression} values={values} />
     default:
       return null
   }
@@ -333,7 +369,7 @@ export function SimulationWidget({ widget }) {
     <div className="sim-widget" data-widget-id={widget.widget_id}>
       <h3>{widget.title}</h3>
       <div className="sim-widget-formula">{widget.formula_latex}</div>
-      <SimulationCanvas simType={widget.sim_type} values={values} />
+      <SimulationCanvas simType={widget.sim_type} values={values} expression={widget.expression} />
       <ParameterSliders parameters={widget.parameters} values={values} onChange={handleChange} />
     </div>
   )

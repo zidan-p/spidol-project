@@ -45,8 +45,8 @@ The set of strokes submitted to the AI pipeline on an AI Trigger: every stroke d
 _Avoid_: Recent strokes, time-windowed selection
 
 **Simulation Type**:
-One of a fixed, hand-built set of `SimulationWidget` renderers — `spring_mass`, `pendulum`, `projectile` (each driven by a hand-written RK4 integrator) and `linear_function` (pure algebra, an interactive x slider instead of time-based animation, no RK4). The AI pipeline classifies a formula into one of these and extracts its parameters; it never invents a new renderer. An unrecognized type surfaces a "concept detected but not yet supported" state instead of failing.
-_Avoid_: Generative simulation, dynamic renderer, rigid-body physics engine
+Either a fixed physics type (`spring_mass`, `pendulum`, `projectile`, each driven by a hand-written RK4 integrator — never a general physics engine) or `function_graph` (docs/adr/0006): a deliberately generative exception covering any single-variable `y = f(x)` math (linear, quadratic, trig, exponential, ...), where the AI returns an `expression` evaluated via mathjs rather than a hand-written-per-formula renderer. An unrecognized type (one that isn't a physics type and isn't expressible as `function_graph`) surfaces a "concept detected but not yet supported" state instead of failing.
+_Avoid_: Generative physics simulation, rigid-body physics engine
 
 **Tracking Loss**:
 A brief (under ~150ms) failure of `OpticalColorTracker` to locate the Pen Tip, most commonly caused by the writer's own hand/wrist occluding it during normal strokes — distinct from the Projector Shadow Principle, which only addresses the instructor's body blocking the projector beam. Bridged by interpolating a straight line between the last-known and reacquired points; beyond the threshold, the stroke ends (pen-up) rather than guessing across a long gap.

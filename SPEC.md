@@ -144,7 +144,7 @@ class BaseTouchProvider(ABC):
        ]
      }
      ```
-  4. **Simulation Type** is one of a fixed, hand-built enum: `spring_mass`, `pendulum`, `projectile` (each with a hand-written RK4 integrator), and `linear_function` (pure algebra, no RK4 — an interactive x slider instead of time-based animation) **(ADR-0004)**. An unrecognized type surfaces a "concept detected but not yet supported" state in the UI rather than failing.
+  4. **Simulation Type** is either a fixed physics type — `spring_mass`, `pendulum`, `projectile`, each with a hand-written RK4 integrator **(ADR-0004)** — or the deliberately generative `function_graph` **(ADR-0006)**: any single-variable `y = f(x)` math (linear, quadratic, trig, exponential, ...), where the AI also returns an `expression` evaluated via `mathjs`, with an interactive x slider instead of time-based animation. An unrecognized type surfaces a "concept detected but not yet supported" state in the UI rather than failing.
   5. Dispatches an `AI_WIDGET_SPAWN` broadcast to the frontend via WebSocket.
 - **Cached Fallback Schema:** if the live Gemini call errors or exceeds a timeout (~3s), the server serves a pre-baked schema for the specific demo formula, so a dropped venue connection never visibly breaks the live run. The real API call is always attempted first.
 

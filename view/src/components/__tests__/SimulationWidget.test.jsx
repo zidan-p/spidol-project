@@ -84,10 +84,11 @@ describe('SimulationWidget', () => {
     expect(screen.getByLabelText('Launch Angle (deg)')).toBeInTheDocument()
   })
 
-  it('renders linear_function with an m/b slider pair and an interactive x slider', () => {
+  it('renders a linear function_graph with an m/b slider pair and an interactive x slider', () => {
     const linearFunction = {
       ...springMassWidget,
-      sim_type: 'linear_function',
+      sim_type: 'function_graph',
+      expression: 'm*x + b',
       title: 'Linear Function',
       formula_latex: 'y = 2x',
       parameters: [
@@ -103,10 +104,42 @@ describe('SimulationWidget', () => {
 
     const xSlider = screen.getByLabelText('x')
     expect(xSlider).toHaveAttribute('type', 'range')
-    expect(screen.getByTestId('linear-function-y-value')).toHaveTextContent('y = 0.00')
+    expect(screen.getByTestId('function-graph-y-value')).toHaveTextContent('y = 0.00')
 
     fireEvent.change(xSlider, { target: { value: '3' } })
-    expect(screen.getByTestId('linear-function-y-value')).toHaveTextContent('y = 6.00')
+    expect(screen.getByTestId('function-graph-y-value')).toHaveTextContent('y = 6.00')
+  })
+
+  it('renders a quadratic function_graph (any math that can be graphed, not just linear)', () => {
+    const quadratic = {
+      ...springMassWidget,
+      sim_type: 'function_graph',
+      expression: 'a*x^2 + b*x + c',
+      title: 'Quadratic Function',
+      formula_latex: 'y = x^2',
+      parameters: [
+        { key: 'a', label: 'a', min: -5, max: 5, val: 1 },
+        { key: 'b', label: 'b', min: -10, max: 10, val: 0 },
+        { key: 'c', label: 'c', min: -10, max: 10, val: 0 },
+      ],
+    }
+    render(<SimulationWidget widget={quadratic} />)
+
+    const xSlider = screen.getByLabelText('x')
+    fireEvent.change(xSlider, { target: { value: '3' } })
+    expect(screen.getByTestId('function-graph-y-value')).toHaveTextContent('y = 9.00')
+  })
+
+  it('renders a fallback message instead of crashing when the expression fails to parse', () => {
+    const malformedExpression = {
+      ...springMassWidget,
+      sim_type: 'function_graph',
+      expression: 'a*x^2 +* b',
+      title: 'Broken Expression',
+    }
+    render(<SimulationWidget widget={malformedExpression} />)
+
+    expect(screen.getByText(/couldn't render this function/i)).toBeInTheDocument()
   })
 
   it('renders a distinct "concept detected but not yet supported" state for AI_WIDGET_UNSUPPORTED', () => {
