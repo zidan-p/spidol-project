@@ -1,15 +1,17 @@
-// Fixed-enum physics widget (SPEC.md 3.3 Simulation Widgets, GLOSSARY.md:
-// Simulation Type). Each Simulation Type is rendered by its own
-// hand-written RK4 integrator (no general physics library, see
-// lib/rk4.js), with real-time parameter sliders editable via mouse. A
-// distinct "concept detected but not yet supported" state is rendered for
+// Fixed-enum physics/math widget (SPEC.md 3.3 Simulation Widgets,
+// GLOSSARY.md: Simulation Type). spring_mass/pendulum/projectile are each
+// rendered by their own hand-written RK4 integrator (no general physics
+// library, see lib/rk4.js); linear_function is pure algebra (no RK4, see
+// LinearFunctionWidget) with an interactive x slider instead of time-based
+// animation. All four have real-time parameter sliders editable via mouse.
+// A distinct "concept detected but not yet supported" state is rendered for
 // AI_WIDGET_UNSUPPORTED (and, defensively, for any AI_WIDGET_SPAWN whose
-// sim_type somehow isn't one of the three fixed renderers) rather than
+// sim_type somehow isn't one of the four fixed renderers) rather than
 // crashing or doing nothing.
 import { useEffect, useRef, useState } from 'react'
 import { pendulumAccel, projectileStep, rk4Step, springMassAccel } from '../lib/rk4'
 
-const SUPPORTED_SIM_TYPES = new Set(['spring_mass', 'pendulum', 'projectile'])
+const SUPPORTED_SIM_TYPES = new Set(['spring_mass', 'pendulum', 'projectile', 'linear_function'])
 
 function parametersToState(parameters) {
   const state = {}
@@ -191,6 +193,82 @@ function ProjectileWidget({ values }) {
   return <canvas ref={canvasRef} width={240} height={160} className="sim-widget-canvas" />
 }
 
+// Linear Function (y = m*x + b) isn't a differential equation -- no RK4
+// integrator applies here, just algebra -- so instead of animating over
+// time like the physics widgets above, it's a static line plot with an
+// interactive `x` slider (local UI state, not one of the AI-returned
+// `parameters`) that moves a point along the line and shows the live y
+// value. The `m`/`b` sliders from `parameters` still reshape the line
+// itself via the shared `ParameterSliders` rendered in `SimulationWidget`.
+const LINEAR_FUNCTION_DOMAIN = 10
+
+function LinearFunctionWidget({ values }) {
+  const { m, b } = values
+  const [x, setX] = useState(0)
+  const y = m * x + b
+  const canvasRef = useRef(null)
+
+  useEffect(() => {
+    const canvas = canvasRef.current
+    if (!canvas) return
+    const ctx = canvas.getContext && canvas.getContext('2d')
+    if (!ctx) return
+    const { width, height } = canvas
+    const domain = LINEAR_FUNCTION_DOMAIN
+    const toPx = (vx, vy) => [
+      (vx + domain) * (width / (2 * domain)),
+      height - (vy + domain) * (height / (2 * domain)),
+    ]
+
+    ctx.clearRect(0, 0, width, height)
+
+    ctx.strokeStyle = '#555'
+    ctx.beginPath()
+    const [axX0, axY0] = toPx(-domain, 0)
+    const [axX1, axY1] = toPx(domain, 0)
+    ctx.moveTo(axX0, axY0)
+    ctx.lineTo(axX1, axY1)
+    const [ayX0, ayY0] = toPx(0, -domain)
+    const [ayX1, ayY1] = toPx(0, domain)
+    ctx.moveTo(ayX0, ayY0)
+    ctx.lineTo(ayX1, ayY1)
+    ctx.stroke()
+
+    ctx.strokeStyle = '#c792ea'
+    ctx.beginPath()
+    const [lineX0, lineY0] = toPx(-domain, m * -domain + b)
+    const [lineX1, lineY1] = toPx(domain, m * domain + b)
+    ctx.moveTo(lineX0, lineY0)
+    ctx.lineTo(lineX1, lineY1)
+    ctx.stroke()
+
+    const [pointX, pointY] = toPx(x, y)
+    ctx.fillStyle = '#ffd166'
+    ctx.beginPath()
+    ctx.arc(pointX, pointY, 6, 0, Math.PI * 2)
+    ctx.fill()
+  }, [m, b, x, y])
+
+  return (
+    <div className="sim-widget-linear-function">
+      <canvas ref={canvasRef} width={240} height={160} className="sim-widget-canvas" />
+      <div className="sim-widget-slider-row">
+        <label htmlFor="sim-linear-function-x">x</label>
+        <input
+          id="sim-linear-function-x"
+          type="range"
+          min={-LINEAR_FUNCTION_DOMAIN}
+          max={LINEAR_FUNCTION_DOMAIN}
+          step={0.1}
+          value={x}
+          onChange={(event) => setX(Number(event.target.value))}
+        />
+        <span data-testid="linear-function-y-value">y = {y.toFixed(2)}</span>
+      </div>
+    </div>
+  )
+}
+
 function SimulationCanvas({ simType, values }) {
   switch (simType) {
     case 'spring_mass':
@@ -199,6 +277,8 @@ function SimulationCanvas({ simType, values }) {
       return <PendulumWidget values={values} />
     case 'projectile':
       return <ProjectileWidget values={values} />
+    case 'linear_function':
+      return <LinearFunctionWidget values={values} />
     default:
       return null
   }

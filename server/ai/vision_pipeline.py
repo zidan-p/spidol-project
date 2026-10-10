@@ -46,10 +46,12 @@ _MARKDOWN_FENCE_RE = re.compile(r"^```(?:json)?\s*(.*?)\s*```$", re.DOTALL)
 
 PROMPT_TEXT = (
     "Extract the handwritten physics/math formula in this image. "
-    "Classify it as one of: spring_mass, pendulum, projectile -- or, if it "
-    "doesn't match any of those, your best short snake_case label for the "
-    "concept. Return its LaTeX, a short concept title, and reasonable "
-    "adjustable parameters with min/max/default values.\n\n"
+    "Classify it as one of: spring_mass, pendulum, projectile, "
+    "linear_function -- or, if it doesn't match any of those, your best "
+    "short snake_case label for the concept. Return its LaTeX, a short "
+    "concept title, and reasonable adjustable parameters with min/max/"
+    "default values. For linear_function (y = m*x + b), return exactly two "
+    "parameters keyed \"m\" (slope) and \"b\" (intercept).\n\n"
     "Respond with ONLY a single JSON object (no prose, no markdown code "
     "fence), matching exactly this shape:\n"
     '{"formula_latex": "<latex string>", "concept_title": "<short title>", '
@@ -78,6 +80,7 @@ class SimulationType(str, Enum):
     SPRING_MASS = "spring_mass"
     PENDULUM = "pendulum"
     PROJECTILE = "projectile"
+    LINEAR_FUNCTION = "linear_function"
 
 
 def is_supported_simulation_type(value: str) -> bool:

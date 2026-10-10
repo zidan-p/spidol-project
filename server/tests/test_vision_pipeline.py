@@ -108,7 +108,7 @@ def test_no_client_configured_falls_back_to_cached_schema_without_crashing():
     assert result == CACHED_FALLBACK_SCHEMA
 
 
-@pytest.mark.parametrize("sim_type", ["spring_mass", "pendulum", "projectile"])
+@pytest.mark.parametrize("sim_type", ["spring_mass", "pendulum", "projectile", "linear_function"])
 def test_recognized_simulation_types(sim_type):
     assert is_supported_simulation_type(sim_type) is True
 

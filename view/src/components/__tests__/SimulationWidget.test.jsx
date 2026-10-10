@@ -84,6 +84,31 @@ describe('SimulationWidget', () => {
     expect(screen.getByLabelText('Launch Angle (deg)')).toBeInTheDocument()
   })
 
+  it('renders linear_function with an m/b slider pair and an interactive x slider', () => {
+    const linearFunction = {
+      ...springMassWidget,
+      sim_type: 'linear_function',
+      title: 'Linear Function',
+      formula_latex: 'y = 2x',
+      parameters: [
+        { key: 'm', label: 'Slope (m)', min: -10, max: 10, val: 2 },
+        { key: 'b', label: 'Intercept (b)', min: -10, max: 10, val: 0 },
+      ],
+    }
+    const { container } = render(<SimulationWidget widget={linearFunction} />)
+
+    expect(container.querySelector('canvas')).toBeTruthy()
+    expect(screen.getByLabelText('Slope (m)')).toHaveValue('2')
+    expect(screen.getByLabelText('Intercept (b)')).toHaveValue('0')
+
+    const xSlider = screen.getByLabelText('x')
+    expect(xSlider).toHaveAttribute('type', 'range')
+    expect(screen.getByTestId('linear-function-y-value')).toHaveTextContent('y = 0.00')
+
+    fireEvent.change(xSlider, { target: { value: '3' } })
+    expect(screen.getByTestId('linear-function-y-value')).toHaveTextContent('y = 6.00')
+  })
+
   it('renders a distinct "concept detected but not yet supported" state for AI_WIDGET_UNSUPPORTED', () => {
     render(<SimulationWidget widget={unsupportedWidget} />)
 
