@@ -34,7 +34,10 @@ function ParameterSliders({ parameters, values, onChange }) {
         const decimals = decimalPlacesForStep(step)
         return (
           <div className="sim-widget-slider-row" key={param.key}>
-            <label htmlFor={`sim-param-${param.key}`}>{param.label}</label>
+            <div className="sim-widget-slider-row__header">
+              <label htmlFor={`sim-param-${param.key}`}>{param.label}</label>
+              <span data-testid={`param-value-${param.key}`}>{values[param.key]}</span>
+            </div>
             <input
               id={`sim-param-${param.key}`}
               type="range"
@@ -46,7 +49,6 @@ function ParameterSliders({ parameters, values, onChange }) {
                 onChange(param.key, Number(Number(event.target.value).toFixed(decimals)))
               }
             />
-            <span data-testid={`param-value-${param.key}`}>{values[param.key]}</span>
           </div>
         )
       })}
@@ -264,7 +266,10 @@ function LinearFunctionWidget({ values }) {
     <div className="sim-widget-linear-function">
       <canvas ref={canvasRef} width={240} height={160} className="sim-widget-canvas" />
       <div className="sim-widget-slider-row">
-        <label htmlFor="sim-linear-function-x">x</label>
+        <div className="sim-widget-slider-row__header">
+          <label htmlFor="sim-linear-function-x">x</label>
+          <span data-testid="linear-function-y-value">y = {y.toFixed(2)}</span>
+        </div>
         <input
           id="sim-linear-function-x"
           type="range"
@@ -274,7 +279,6 @@ function LinearFunctionWidget({ values }) {
           value={x}
           onChange={(event) => setX(Number(event.target.value))}
         />
-        <span data-testid="linear-function-y-value">y = {y.toFixed(2)}</span>
       </div>
     </div>
   )

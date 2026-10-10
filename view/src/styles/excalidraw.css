@@ -108,16 +108,31 @@ body,
 }
 
 .sim-widget-slider-row {
+  margin: 10px 0;
+}
+
+.sim-widget-slider-row__header {
   display: flex;
-  align-items: center;
+  align-items: baseline;
+  justify-content: space-between;
   gap: 8px;
-  margin: 6px 0;
+  margin-bottom: 4px;
 }
 
 .sim-widget-slider-row label {
-  flex: 1;
   font-size: 11px;
-  color: #9ca3af;
+  color: var(--chrome-text-muted);
+}
+
+.sim-widget-slider-row__header span {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--chrome-text);
+}
+
+.sim-widget-slider-row input[type='range'] {
+  display: block;
+  width: 100%;
 }
 
 .sim-widget-canvas {
