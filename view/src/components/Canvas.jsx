@@ -211,5 +211,5 @@ export const Canvas = forwardRef(function Canvas(
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [latestTrackRef])
 
-  return <canvas ref={canvasRef} className="spidol-canvas" />
+  return <canvas ref={canvasRef} className="block h-full w-full cursor-crosshair bg-black" />
 })

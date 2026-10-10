@@ -1,4 +1,20 @@
-/* Base reset. App-specific styling lives in styles/excalidraw.css. */
+@import "tailwindcss";
+
+/* Theme tokens (Tailwind v4 @theme): generates bg-accent/text-accent/
+   border-chrome-border/etc utilities used throughout the app's dark glass
+   chrome, instead of each component hand-rolling its own color values. */
+@theme {
+  --color-chrome-bg: rgba(24, 24, 27, 0.72);
+  --color-chrome-border: rgba(255, 255, 255, 0.08);
+  --color-chrome-text: #e5e7eb;
+  --color-chrome-muted: #9ca3af;
+  --color-accent: #7c93ff;
+  --color-accent-soft: rgba(124, 147, 255, 0.18);
+  --color-ok: #4ade80;
+  --color-warn: #fbbf24;
+  --color-danger: #f87171;
+}
+
 * {
   box-sizing: border-box;
 }

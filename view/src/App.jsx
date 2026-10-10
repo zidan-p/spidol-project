@@ -29,7 +29,9 @@ import { useBlackoutMode } from './hooks/useBlackoutMode'
 import { useKioskMode } from './hooks/useKioskMode'
 import { useSpidolSocket } from './hooks/useSpidolSocket'
 import { useUndoRedoHotkeys } from './hooks/useUndoRedoHotkeys'
-import './styles/excalidraw.css'
+
+const HUD_BUTTON_CLASS =
+  'flex items-center gap-1.5 rounded-xl border border-transparent px-3 py-2 text-[13px] font-medium text-chrome-muted transition-colors hover:not-disabled:bg-white/8 hover:not-disabled:text-chrome-text disabled:cursor-default disabled:opacity-35'
 
 // Safety upper bound on the processing indicator: the server always
 // eventually broadcasts something (a real analysis or the Cached Fallback
@@ -144,7 +146,11 @@ function App() {
   }
 
   return (
-    <div className="spidol-app" data-blackout={isBlackout} data-kiosk={isKiosk}>
+    <div
+      className="relative h-screen w-screen overflow-hidden bg-black data-[kiosk=true]:cursor-none data-[kiosk=true]:**:cursor-none!"
+      data-blackout={isBlackout}
+      data-kiosk={isKiosk}
+    >
       {!isBlackout && (
         <>
           <ToolIsland tool={tool} onSelectTool={setTool} />
@@ -158,38 +164,41 @@ function App() {
           />
           <StatusCapsule connectionState={connectionState} camera={camera} touch={touch} />
           {isAiProcessing && (
-            <div className="ai-processing-banner" role="status">
-              <Loader2 className="ai-processing-banner__spinner" aria-hidden="true" size={16} />
+            <div
+              role="status"
+              className="pointer-events-none absolute top-16 left-1/2 z-11 flex -translate-x-1/2 items-center gap-2 rounded-full border border-accent/35 bg-accent-soft px-4 py-2 text-[13px] font-medium text-accent shadow-[0_8px_24px_rgba(0,0,0,0.45)]"
+            >
+              <Loader2 className="animate-spin" aria-hidden="true" size={16} />
               Analyzing your drawing…
             </div>
           )}
-          <div className="hud hud--bottom-left">
-            <button type="button" onClick={handleUndo} disabled={!history.canUndo}>
+          <div className="absolute bottom-4 left-4 z-10 flex gap-1.5 rounded-2xl border border-chrome-border bg-chrome-bg p-1.5 shadow-[0_8px_24px_rgba(0,0,0,0.45)] backdrop-blur-md">
+            <button type="button" onClick={handleUndo} disabled={!history.canUndo} className={HUD_BUTTON_CLASS}>
               <Undo2 size={16} aria-hidden="true" />
               Undo
             </button>
-            <button type="button" onClick={handleRedo} disabled={!history.canRedo}>
+            <button type="button" onClick={handleRedo} disabled={!history.canRedo} className={HUD_BUTTON_CLASS}>
               <Redo2 size={16} aria-hidden="true" />
               Redo
             </button>
-            <button type="button" onClick={handleClear}>
+            <button type="button" onClick={handleClear} className={HUD_BUTTON_CLASS}>
               <Trash2 size={16} aria-hidden="true" />
               Clear
             </button>
             <button
               type="button"
-              className="hud__ai-trigger"
               onClick={handleAiTrigger}
               disabled={isAiProcessing}
+              className={`${HUD_BUTTON_CLASS} border-accent/35! bg-accent-soft! font-semibold! text-accent! hover:not-disabled:bg-accent/28!`}
             >
               {isAiProcessing ? (
-                <Loader2 size={16} aria-hidden="true" className="spin" />
+                <Loader2 size={16} aria-hidden="true" className="animate-spin" />
               ) : (
                 <Sparkles size={16} aria-hidden="true" />
               )}
               {isAiProcessing ? 'Analyzing…' : 'Analyze drawing'}
             </button>
-            <button type="button" onClick={toggleKiosk}>
+            <button type="button" onClick={toggleKiosk} className={HUD_BUTTON_CLASS}>
               {isKiosk ? (
                 <Minimize2 size={16} aria-hidden="true" />
               ) : (
@@ -202,7 +211,7 @@ function App() {
             <input
               type="text"
               autoFocus
-              className="text-tool-input"
+              className="absolute z-10 -translate-y-1 border border-dashed border-chrome-muted bg-transparent font-sans text-base text-white"
               style={{ left: `${pendingText.x * 100}%`, top: `${pendingText.y * 100}%` }}
               onKeyDown={(event) => {
                 if (event.key === 'Enter') commitPendingText(event.currentTarget.value)
@@ -222,7 +231,7 @@ function App() {
         onTextPlacement={handleTextPlacement}
         onTouchChange={setIsTouching}
       />
-      <div className="sim-widget-layer">
+      <div className="pointer-events-none absolute inset-0 z-5">
         {widgets.map((widget) => (
           <SimulationWidget key={widget.widget_id} widget={widget} />
         ))}

@@ -73,8 +73,7 @@ spidol-project/
         ├── hooks/
         │   ├── useSpidolSocket.js   # WebSocket client reading telemetry at 60 FPS
         │   └── useDualInput.js      # Unified input pipeline (Mouse pointer + SPIDOL events)
-        └── styles/
-            └── excalidraw.css       # Pitch-black (#000000) dark theme for optical projection
+        └── index.css                # Tailwind entry point + theme tokens (dark/pitch-black palette)
 ```
 
 ---
@@ -155,7 +154,7 @@ class BaseTouchProvider(ABC):
 ---
 
 ### 3.3 Subproject `./view` (React Canvas Frontend)
-- **Stack:** React 18/19, Vite, `pnpm`. A **hand-rolled** canvas, not the `@excalidraw/excalidraw` package — "Excalidraw" refers only to the visual inspiration **(see GLOSSARY)**. Owning the render loop matters here because of the dual-input stream and the `SimulationWidget` overlay.
+- **Stack:** React 18/19, Vite, `pnpm`, Tailwind CSS v4 (via `@tailwindcss/vite`) for all UI chrome styling. A **hand-rolled** canvas, not the `@excalidraw/excalidraw` package — "Excalidraw" refers only to the visual inspiration **(see GLOSSARY)**. Owning the render loop matters here because of the dual-input stream and the `SimulationWidget` overlay.
 - **UI System:**
   - *Floating Island Dock (Center-Top):* Tool selectors (Freehand Pen [Default], Eraser, Rectangle, Ellipse, Arrow, Line, Text).
   - *Left Property Sidebar:* Color palettes, stroke weight increments (2px, 4px, 8px), dash styles.

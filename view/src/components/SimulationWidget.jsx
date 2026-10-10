@@ -24,6 +24,15 @@ import { pendulumAccel, projectileStep, rk4Step, springMassAccel } from '../lib/
 
 const SUPPORTED_SIM_TYPES = new Set(['spring_mass', 'pendulum', 'projectile', 'function_graph'])
 
+const CARD_CLASS =
+  'pointer-events-auto absolute top-[10%] right-[5%] w-70 rounded-2xl border border-chrome-border bg-chrome-bg p-4 px-4.5 text-[13px] text-chrome-text shadow-[0_8px_24px_rgba(0,0,0,0.45)] backdrop-blur-lg accent-accent'
+const FORMULA_CLASS = 'my-1.5 font-mono text-chrome-muted'
+const SLIDER_ROW_CLASS = 'my-2.5'
+const SLIDER_ROW_HEADER_CLASS = 'mb-1 flex items-baseline justify-between gap-2'
+const SLIDER_LABEL_CLASS = 'text-[11px] text-chrome-muted'
+const SLIDER_VALUE_CLASS = 'text-xs font-semibold text-chrome-text'
+const CANVAS_CLASS = 'my-2 block rounded bg-[#0a0a0a]'
+
 function parametersToState(parameters) {
   const state = {}
   for (const param of parameters) {
@@ -34,7 +43,7 @@ function parametersToState(parameters) {
 
 function ParameterSliders({ parameters, values, onChange }) {
   return (
-    <div className="sim-widget-sliders">
+    <div>
       {parameters.map((param) => {
         // A "nice" (1/2/5 x 10^n) step instead of the raw (max-min)/200:
         // that produced awkward steps like 0.45, so dragging the slider
@@ -43,14 +52,19 @@ function ParameterSliders({ parameters, values, onChange }) {
         const step = niceStep(param.min, param.max)
         const decimals = decimalPlacesForStep(step)
         return (
-          <div className="sim-widget-slider-row" key={param.key}>
-            <div className="sim-widget-slider-row__header">
-              <label htmlFor={`sim-param-${param.key}`}>{param.label}</label>
-              <span data-testid={`param-value-${param.key}`}>{values[param.key]}</span>
+          <div className={SLIDER_ROW_CLASS} key={param.key}>
+            <div className={SLIDER_ROW_HEADER_CLASS}>
+              <label htmlFor={`sim-param-${param.key}`} className={SLIDER_LABEL_CLASS}>
+                {param.label}
+              </label>
+              <span data-testid={`param-value-${param.key}`} className={SLIDER_VALUE_CLASS}>
+                {values[param.key]}
+              </span>
             </div>
             <input
               id={`sim-param-${param.key}`}
               type="range"
+              className="block w-full"
               min={param.min}
               max={param.max}
               step={step}
@@ -135,7 +149,7 @@ function SpringMassWidget({ values }) {
     },
     [k, m]
   )
-  return <canvas ref={canvasRef} width={240} height={160} className="sim-widget-canvas" />
+  return <canvas ref={canvasRef} width={240} height={160} className={CANVAS_CLASS} />
 }
 
 function PendulumWidget({ values }) {
@@ -171,7 +185,7 @@ function PendulumWidget({ values }) {
     },
     [g, L]
   )
-  return <canvas ref={canvasRef} width={240} height={160} className="sim-widget-canvas" />
+  return <canvas ref={canvasRef} width={240} height={160} className={CANVAS_CLASS} />
 }
 
 function ProjectileWidget({ values }) {
@@ -213,7 +227,7 @@ function ProjectileWidget({ values }) {
     },
     [v0, angle, g]
   )
-  return <canvas ref={canvasRef} width={240} height={160} className="sim-widget-canvas" />
+  return <canvas ref={canvasRef} width={240} height={160} className={CANVAS_CLASS} />
 }
 
 // function_graph (any y = f(x): linear, quadratic, trig, exponential, ...)
@@ -352,26 +366,25 @@ function FunctionGraphWidget({ expression, values }) {
   }, [compiled, points, x, y])
 
   if (!compiled) {
-    return (
-      <div className="sim-widget-function-graph-error">
-        Couldn't render this function — the AI's expression didn't parse.
-      </div>
-    )
+    return <div className="text-[13px] text-amber-400">Couldn't render this function — the AI's expression didn't parse.</div>
   }
 
   return (
-    <div className="sim-widget-function-graph">
-      <canvas ref={canvasRef} height={160} className="sim-widget-canvas sim-widget-function-canvas" />
-      <div className="sim-widget-slider-row">
-        <div className="sim-widget-slider-row__header">
-          <label htmlFor="sim-function-graph-x">x</label>
-          <span data-testid="function-graph-y-value">
+    <div>
+      <canvas ref={canvasRef} height={160} className={`${CANVAS_CLASS} h-40 w-full`} />
+      <div className={SLIDER_ROW_CLASS}>
+        <div className={SLIDER_ROW_HEADER_CLASS}>
+          <label htmlFor="sim-function-graph-x" className={SLIDER_LABEL_CLASS}>
+            x
+          </label>
+          <span data-testid="function-graph-y-value" className={SLIDER_VALUE_CLASS}>
             y = {Number.isFinite(y) ? y.toFixed(2) : 'undefined'}
           </span>
         </div>
         <input
           id="sim-function-graph-x"
           type="range"
+          className="block w-full"
           min={-FUNCTION_GRAPH_X_DOMAIN}
           max={FUNCTION_GRAPH_X_DOMAIN}
           step={0.1}
@@ -404,12 +417,10 @@ function UnsupportedWidget({ widget }) {
   const attemptedSimType = widget.attempted_sim_type ?? widget.sim_type
 
   return (
-    <div className="sim-widget sim-widget-unsupported" data-widget-id={widget.widget_id}>
-      <h3>{title}</h3>
-      {formula && <div className="sim-widget-formula">{formula}</div>}
-      <p className="sim-widget-unsupported-message">
-        Concept detected, but not yet supported ({attemptedSimType}).
-      </p>
+    <div className={`${CARD_CLASS} border-amber-800 text-amber-400`} data-widget-id={widget.widget_id}>
+      <h3 className="font-semibold">{title}</h3>
+      {formula && <div className={FORMULA_CLASS}>{formula}</div>}
+      <p className="text-[13px]">Concept detected, but not yet supported ({attemptedSimType}).</p>
     </div>
   )
 }
@@ -429,9 +440,9 @@ export function SimulationWidget({ widget }) {
   }
 
   return (
-    <div className="sim-widget" data-widget-id={widget.widget_id}>
-      <h3>{widget.title}</h3>
-      <div className="sim-widget-formula">{widget.formula_latex}</div>
+    <div className={CARD_CLASS} data-widget-id={widget.widget_id}>
+      <h3 className="font-semibold">{widget.title}</h3>
+      <div className={FORMULA_CLASS}>{widget.formula_latex}</div>
       <SimulationCanvas simType={widget.sim_type} values={values} expression={widget.expression} />
       <ParameterSliders parameters={widget.parameters} values={values} onChange={handleChange} />
     </div>
