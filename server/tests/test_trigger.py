@@ -11,8 +11,10 @@ from hal.image_source import BlankCanvasImageSource
 class _FakeCompletions:
     def __init__(self, response_text):
         self._response_text = response_text
+        self.call_count = 0
 
     def create(self, *, model, messages, response_format):
+        self.call_count += 1
         return _FakeResponse(self._response_text)
 
 
@@ -33,7 +35,8 @@ class _FakeResponse:
 
 class _FakeClient:
     def __init__(self, response_text):
-        self.chat = type("Chat", (), {"completions": _FakeCompletions(response_text)})()
+        self.completions = _FakeCompletions(response_text)
+        self.chat = type("Chat", (), {"completions": self.completions})()
 
 
 SPRING_MASS_JSON = json.dumps(
@@ -87,7 +90,7 @@ def test_handle_ai_trigger_marks_trigger_so_region_resets():
     assert tracker.region_since_last_trigger() is None
 
 
-def test_handle_ai_trigger_with_no_strokes_still_works():
+def test_handle_ai_trigger_with_no_strokes_serves_dummy_graph_without_calling_the_vision_model():
     tracker = StrokeRegionTracker()
     client = _FakeClient(SPRING_MASS_JSON)
     image_source = BlankCanvasImageSource()
@@ -98,6 +101,11 @@ def test_handle_ai_trigger_with_no_strokes_still_works():
     payload = json.loads(raw)
 
     assert payload["type"] == "AI_WIDGET_SPAWN"
+    assert payload["sim_type"] == "function_graph"
+    # The whole point: an empty AI Trigger Region never spends a vision
+    # model call (and its tokens) on a press that can't possibly contain a
+    # real formula.
+    assert client.completions.call_count == 0
 
 
 def test_handle_ai_trigger_with_no_client_falls_back_to_cached_schema_and_still_spawns():

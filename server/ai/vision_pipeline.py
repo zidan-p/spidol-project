@@ -203,6 +203,23 @@ times out, so a dropped venue connection never visibly breaks the live run.
 """
 
 
+DUMMY_EMPTY_BOARD_SCHEMA = FormulaAnalysis(
+    formula_latex=r"y = \sin(x)",
+    concept_title="Dummy Graph (Empty Board)",
+    simulation_type=SimulationType.FUNCTION_GRAPH.value,
+    expression="sin(x)",
+    parameters=[],
+)
+"""Served instead of calling the vision model at all when the AI Trigger
+Region is empty (GLOSSARY.md: AI Trigger Region) -- an "Analyze drawing"
+press with nothing drawn since the last trigger/clear can't possibly be a
+real formula, so there's nothing worth spending a vision model call (and
+its tokens) on. Distinct from `CACHED_FALLBACK_SCHEMA`, which is served
+when a *real* attempt was made and failed/timed out -- this one is served
+when no attempt is made at all.
+"""
+
+
 def make_live_client(api_key: str | None = None, base_url: str = DEFAULT_BASE_URL):
     """Constructs a real OpenAI-compatible client pointed at `base_url`
     (defaults to Gemini's own OpenAI-compatible endpoint; pass OpenRouter's

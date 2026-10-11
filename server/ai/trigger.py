@@ -18,7 +18,7 @@ from hal.image_source import BaseImageSource
 
 from .crop import crop_region_from_frame, encode_png
 from .dispatch import build_widget_message
-from .vision_pipeline import DEFAULT_MODEL, DEFAULT_TIMEOUT_S, analyze_formula_crop
+from .vision_pipeline import DEFAULT_MODEL, DEFAULT_TIMEOUT_S, DUMMY_EMPTY_BOARD_SCHEMA, analyze_formula_crop
 from .stroke_region import StrokeRegionTracker
 
 _widget_id_counter = itertools.count(1)
@@ -41,17 +41,21 @@ def handle_ai_trigger(
     # rather than being silently folded into this one.
     stroke_tracker.mark_trigger()
 
+    widget_id = f"widget_{next(_widget_id_counter):02d}"
+
+    if region is None:
+        # Nothing has been drawn since the last trigger/clear -- an "Analyze
+        # drawing" press here can't possibly be a real formula, so skip the
+        # vision model call entirely (no crop, no image, no API tokens
+        # spent) and serve a dummy function_graph widget instead.
+        return build_widget_message(
+            DUMMY_EMPTY_BOARD_SCHEMA, widget_id=widget_id, anchor_x=0.5, anchor_y=0.5
+        )
+
     frame = image_source.capture_frame()
     crop = crop_region_from_frame(frame, region)
     image_bytes = encode_png(crop)
 
     analysis = analyze_formula_crop(image_bytes, vision_client, timeout_s=timeout_s, model=model)
 
-    widget_id = f"widget_{next(_widget_id_counter):02d}"
-    if region is not None:
-        anchor_x = region.max_x
-        anchor_y = region.min_y
-    else:
-        anchor_x, anchor_y = 0.5, 0.5
-
-    return build_widget_message(analysis, widget_id=widget_id, anchor_x=anchor_x, anchor_y=anchor_y)
+    return build_widget_message(analysis, widget_id=widget_id, anchor_x=region.max_x, anchor_y=region.min_y)

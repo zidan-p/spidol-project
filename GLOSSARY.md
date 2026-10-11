@@ -41,7 +41,7 @@ A pre-baked AI pipeline response for the specific formula used in the competitio
 _Avoid_: Mock response, offline mode
 
 **AI Trigger Region**:
-The set of strokes submitted to the AI pipeline on an AI Trigger: every stroke drawn since the last AI Trigger or canvas clear, not a fixed time window. Matches the user's mental model of "read this batch I just drew."
+The set of strokes submitted to the AI pipeline on an AI Trigger: every stroke drawn since the last AI Trigger or canvas clear, not a fixed time window. Matches the user's mental model of "read this batch I just drew." When this region is empty (nothing drawn since the last trigger/clear), `handle_ai_trigger` (`server/ai/trigger.py`) skips the vision model call entirely and serves a dummy `function_graph` widget instead -- an "Analyze drawing" press on a blank board can't contain a real formula, so there's no reason to spend a real API call (and its tokens) finding that out.
 _Avoid_: Recent strokes, time-windowed selection
 
 **Simulation Type**:

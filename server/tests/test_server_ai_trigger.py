@@ -19,10 +19,24 @@ import numpy as np
 import pytest
 import websockets
 
+from ai.stroke_region import StrokeRegionTracker
 from hal.image_source import BrowserCanvasImageSource
 from hal.providers import KeyboardMockProvider
 from hal.trackers import SystemMouseFallbackTracker
 from server_app import create_server
+
+
+def _drawn_stroke_tracker():
+    # These tests exercise broadcast fanout / the direct-call path / image
+    # submission -- not the "empty board" short-circuit (see
+    # tests/test_trigger.py for that) -- so they need a non-empty AI Trigger
+    # Region to actually reach the vision model, same as test_trigger.py's
+    # own `_drawn_stroke_tracker()`.
+    tracker = StrokeRegionTracker()
+    tracker.ingest(x=0.3, y=0.3, is_touching=True, is_detected=True)
+    tracker.ingest(x=0.6, y=0.5, is_touching=True, is_detected=True)
+    tracker.ingest(x=0.6, y=0.5, is_touching=False, is_detected=True)
+    return tracker
 
 
 class _FakeCompletions:
@@ -101,7 +115,13 @@ async def test_ai_trigger_message_broadcasts_ai_widget_spawn_to_all_clients():
     vision_client = _FakeClient(SPRING_MASS_JSON)
 
     async with create_server(
-        tracker, touch_provider, host="127.0.0.1", port=port, fps=60, vision_client=vision_client
+        tracker,
+        touch_provider,
+        host="127.0.0.1",
+        port=port,
+        fps=60,
+        vision_client=vision_client,
+        stroke_tracker=_drawn_stroke_tracker(),
     ):
         async with websockets.connect(f"ws://127.0.0.1:{port}") as sender, websockets.connect(
             f"ws://127.0.0.1:{port}"
@@ -129,7 +149,14 @@ async def test_ai_trigger_with_no_vision_client_still_spawns_from_cached_fallbac
     tracker = SystemMouseFallbackTracker(position_source=lambda: (0, 0), screen_size=(1000, 1000))
     touch_provider = KeyboardMockProvider()
 
-    async with create_server(tracker, touch_provider, host="127.0.0.1", port=port, fps=60):
+    async with create_server(
+        tracker,
+        touch_provider,
+        host="127.0.0.1",
+        port=port,
+        fps=60,
+        stroke_tracker=_drawn_stroke_tracker(),
+    ):
         async with websockets.connect(f"ws://127.0.0.1:{port}") as client:
             await client.send(json.dumps({"type": "AI_TRIGGER"}))
 
@@ -140,6 +167,7 @@ async def test_ai_trigger_with_no_vision_client_still_spawns_from_cached_fallbac
                     break
 
     assert message["type"] == "AI_WIDGET_SPAWN"
+    assert message["sim_type"] == "spring_mass"  # the Cached Fallback Schema's sim type
 
 
 @pytest.mark.asyncio
@@ -156,7 +184,13 @@ async def test_server_fire_ai_trigger_broadcasts_without_any_websocket_sender():
     vision_client = _FakeClient(SPRING_MASS_JSON)
 
     async with create_server(
-        tracker, touch_provider, host="127.0.0.1", port=port, fps=60, vision_client=vision_client
+        tracker,
+        touch_provider,
+        host="127.0.0.1",
+        port=port,
+        fps=60,
+        vision_client=vision_client,
+        stroke_tracker=_drawn_stroke_tracker(),
     ) as server:
         async with websockets.connect(f"ws://127.0.0.1:{port}") as observer:
             await server.fire_ai_trigger()
@@ -187,7 +221,13 @@ async def test_slow_ai_trigger_does_not_block_new_connections():
     vision_client = _SlowFakeClient(SPRING_MASS_JSON, delay_s=1.0)
 
     async with create_server(
-        tracker, touch_provider, host="127.0.0.1", port=port, fps=60, vision_client=vision_client
+        tracker,
+        touch_provider,
+        host="127.0.0.1",
+        port=port,
+        fps=60,
+        vision_client=vision_client,
+        stroke_tracker=_drawn_stroke_tracker(),
     ) as server:
         start = time.monotonic()
         trigger_task = asyncio.create_task(server.fire_ai_trigger())
@@ -252,6 +292,7 @@ async def test_ai_trigger_with_image_png_base64_crops_the_submitted_canvas_not_a
         fps=60,
         vision_client=_RecordingClient(),
         image_source=image_source,
+        stroke_tracker=_drawn_stroke_tracker(),
     ):
         async with websockets.connect(f"ws://127.0.0.1:{port}") as client:
             await client.send(
