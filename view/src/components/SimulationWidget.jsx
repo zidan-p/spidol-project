@@ -18,14 +18,21 @@
 // sim_type isn't one of these) rather than crashing or doing nothing.
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { niceTicks } from '../lib/axisTicks'
-import { autoscaleY, compileExpression, sampleFunction } from '../lib/functionGraph'
+import {
+  autoscaleX,
+  autoscaleY,
+  compileExpression,
+  sampleFunction,
+  sampleParametric,
+} from '../lib/functionGraph'
+import { panViewport, zoomViewport } from '../lib/graphViewport'
 import { decimalPlacesForStep, niceStep } from '../lib/niceStep'
 import { pendulumAccel, projectileStep, rk4Step, springMassAccel } from '../lib/rk4'
 
 const SUPPORTED_SIM_TYPES = new Set(['spring_mass', 'pendulum', 'projectile', 'function_graph'])
 
 const CARD_CLASS =
-  'pointer-events-auto absolute top-[10%] right-[5%] w-70 rounded-2xl border border-chrome-border bg-chrome-bg p-4 px-4.5 text-[13px] text-chrome-text shadow-[0_8px_24px_rgba(0,0,0,0.45)] backdrop-blur-lg accent-accent'
+  'pointer-events-auto absolute top-[10%] bottom-[10%] right-[5%] w-70 rounded-2xl border border-chrome-border bg-chrome-bg p-4 px-4.5 text-[13px] text-chrome-text shadow-[0_8px_24px_rgba(0,0,0,0.45)] backdrop-blur-lg accent-accent'
 const FORMULA_CLASS = 'my-1.5 font-mono text-chrome-muted'
 const SLIDER_ROW_CLASS = 'my-2.5'
 const SLIDER_ROW_HEADER_CLASS = 'mb-1 flex items-baseline justify-between gap-2'
@@ -230,24 +237,30 @@ function ProjectileWidget({ values }) {
   return <canvas ref={canvasRef} width={240} height={160} className={CANVAS_CLASS} />
 }
 
-// function_graph (any y = f(x): linear, quadratic, trig, exponential, ...)
-// isn't a differential equation -- no RK4 integrator applies, just
-// algebra -- so instead of animating over time like the physics widgets
-// above, it's a static curve plot (lib/functionGraph.js evaluates
-// `expression` via mathjs) with an interactive `x` slider (local UI state,
-// not one of the AI-returned `parameters`) that moves a point along the
-// curve and shows the live y value. The non-x `parameters` (e.g. a/b/c for
-// a quadratic) still reshape the curve via the shared `ParameterSliders`
-// rendered in `SimulationWidget`.
-const FUNCTION_GRAPH_X_DOMAIN = 10
+// function_graph (any math expressible as y = f(x) OR, for curves that
+// fail the vertical-line test like a circle, as a parametric x(t)/y(t) --
+// docs/adr/0006) isn't a differential equation -- no RK4 integrator
+// applies, just algebra -- so instead of animating over time like the
+// physics widgets above, it's a static curve plot (lib/functionGraph.js
+// evaluates expressions via mathjs) with an interactive x/t slider (local
+// UI state, not one of the AI-returned `parameters`) that moves a point
+// along the curve. The non-x/t `parameters` (e.g. a/b/c for a quadratic,
+// or r for a circle) still reshape the curve via the shared
+// `ParameterSliders` rendered in `SimulationWidget`. Pan (drag) and zoom
+// (wheel) are supported directly on the canvas -- see useGraphInteraction.
+const DEFAULT_X_DOMAIN = 10
+const PARAMETRIC_T_RANGE = [0, 2 * Math.PI]
+const ZOOM_IN_FACTOR = 0.85
+const ZOOM_OUT_FACTOR = 1 / ZOOM_IN_FACTOR
 
-// Evaluates `compiled` at a given x, merging in the current parameter
-// values -- shared by the live y-readout and the canvas renderer's curve
-// sampling so there's exactly one evaluation path, not two that could
-// disagree.
-function evaluateAt(compiled, values, x) {
+// Evaluates `compiled` with the given scope (parameter values merged with
+// whichever independent variable applies -- `x` for an explicit y = f(x),
+// `t` for a parametric curve) -- shared by the live cursor readout and the
+// canvas renderer's curve sampling so there's exactly one evaluation path,
+// not two that could disagree.
+function evaluateAt(compiled, scope) {
   try {
-    const result = compiled.evaluate({ ...values, x })
+    const result = compiled.evaluate(scope)
     return Number.isFinite(result) ? result : NaN
   } catch {
     return NaN
@@ -256,7 +269,27 @@ function evaluateAt(compiled, values, x) {
 
 const GRAPH_MARGIN = 28 // px reserved for axis tick labels
 
-function drawFunctionGraph(canvas, { points, x, y, xDomain, yMin, yMax }) {
+// A single, shared pixel<->data-space projection -- used by both the
+// drawing code and the pan/zoom interaction handlers below, so they can
+// never disagree about where a data point lands on screen.
+function makeProjection(viewport, plotLeft, plotRight, plotTop, plotBottom) {
+  const { xMin, xMax, yMin, yMax } = viewport
+  const xSpan = xMax - xMin || 1
+  const ySpan = yMax - yMin || 1
+  const plotWidth = plotRight - plotLeft
+  const plotHeight = plotBottom - plotTop
+
+  return {
+    toPx(vx, vy) {
+      return [plotLeft + ((vx - xMin) / xSpan) * plotWidth, plotBottom - ((vy - yMin) / ySpan) * plotHeight]
+    },
+    toData(px, py) {
+      return [xMin + ((px - plotLeft) / plotWidth) * xSpan, yMin + ((plotBottom - py) / plotHeight) * ySpan]
+    },
+  }
+}
+
+function drawFunctionGraph(canvas, { points, cursor, viewport, closed }) {
   const ctx = canvas.getContext('2d')
   if (!ctx) return
   const { width, height } = canvas
@@ -264,20 +297,16 @@ function drawFunctionGraph(canvas, { points, x, y, xDomain, yMin, yMax }) {
   const plotRight = width
   const plotTop = 4
   const plotBottom = height - GRAPH_MARGIN
-
-  const toPx = (vx, vy) => [
-    plotLeft + ((vx + xDomain) / (2 * xDomain)) * (plotRight - plotLeft),
-    plotBottom - ((vy - yMin) / (yMax - yMin || 1)) * (plotBottom - plotTop),
-  ]
+  const { xMin, xMax, yMin, yMax } = viewport
+  const { toPx } = makeProjection(viewport, plotLeft, plotRight, plotTop, plotBottom)
 
   ctx.clearRect(0, 0, width, height)
   ctx.font = '9px ui-sans-serif, system-ui, sans-serif'
   ctx.fillStyle = '#6b7280'
 
-  // Grid + tick labels, computed from the actual plotted range so they're
-  // always meaningful even as parameter sliders reshape the curve (unlike
-  // a fixed domain, which would make slider changes hard to perceive).
-  for (const tick of niceTicks(-xDomain, xDomain, 5)) {
+  // Grid + tick labels, computed from the current (possibly zoomed/panned)
+  // viewport so they're always meaningful.
+  for (const tick of niceTicks(xMin, xMax, 5)) {
     const [px] = toPx(tick, 0)
     ctx.strokeStyle = '#222'
     ctx.beginPath()
@@ -301,8 +330,8 @@ function drawFunctionGraph(canvas, { points, x, y, xDomain, yMin, yMax }) {
   if (yMin <= 0 && yMax >= 0) {
     ctx.strokeStyle = '#6b7280'
     ctx.beginPath()
-    const [axX0, axY0] = toPx(-xDomain, 0)
-    const [axX1, axY1] = toPx(xDomain, 0)
+    const [axX0, axY0] = toPx(xMin, 0)
+    const [axX1, axY1] = toPx(xMax, 0)
     ctx.moveTo(axX0, axY0)
     ctx.lineTo(axX1, axY1)
     ctx.stroke()
@@ -316,10 +345,11 @@ function drawFunctionGraph(canvas, { points, x, y, xDomain, yMin, yMax }) {
     if (index === 0) ctx.moveTo(px, py)
     else ctx.lineTo(px, py)
   })
+  if (closed && points.length > 1) ctx.closePath()
   ctx.stroke()
 
-  if (Number.isFinite(y)) {
-    const [pointX, pointY] = toPx(x, y)
+  if (cursor && Number.isFinite(cursor.x) && Number.isFinite(cursor.y)) {
+    const [pointX, pointY] = toPx(cursor.x, cursor.y)
     ctx.fillStyle = '#ffd166'
     ctx.beginPath()
     ctx.arc(pointX, pointY, 5, 0, Math.PI * 2)
@@ -327,27 +357,121 @@ function drawFunctionGraph(canvas, { points, x, y, xDomain, yMin, yMax }) {
   }
 }
 
-function FunctionGraphWidget({ expression, values }) {
-  const [x, setX] = useState(0)
+// Wires wheel-to-zoom (centered on the cursor, not just the viewport
+// center) and drag-to-pan directly onto the canvas, independent of the
+// main whiteboard's mouse-fallback touch signal -- these are genuine local
+// DOM events on this specific element, unrelated to useDrawSuppression's
+// concern (which only gates the *whiteboard* canvas's ink).
+function useGraphInteraction(canvasRef, viewport, setViewport) {
+  useEffect(() => {
+    const canvas = canvasRef.current
+    if (!canvas) return undefined
+
+    const plotLeft = GRAPH_MARGIN
+    const plotTop = 4
+
+    const onWheel = (event) => {
+      event.preventDefault()
+      const rect = canvas.getBoundingClientRect()
+      const px = event.clientX - rect.left
+      const py = event.clientY - rect.top
+      const { toData } = makeProjection(viewport, plotLeft, canvas.width, plotTop, canvas.height - GRAPH_MARGIN)
+      const [cx, cy] = toData(px, py)
+      const factor = event.deltaY < 0 ? ZOOM_IN_FACTOR : ZOOM_OUT_FACTOR
+      setViewport((current) => zoomViewport(current, { cx, cy, factor }))
+    }
+
+    let dragState = null
+    const onPointerDown = (event) => {
+      canvas.setPointerCapture(event.pointerId)
+      dragState = { lastX: event.clientX, lastY: event.clientY }
+    }
+    const onPointerMove = (event) => {
+      if (!dragState) return
+      const plotWidth = canvas.width - plotLeft
+      const plotHeight = canvas.height - GRAPH_MARGIN - plotTop
+      const dxPx = event.clientX - dragState.lastX
+      const dyPx = event.clientY - dragState.lastY
+      dragState = { lastX: event.clientX, lastY: event.clientY }
+      setViewport((current) => {
+        const xSpan = current.xMax - current.xMin
+        const ySpan = current.yMax - current.yMin
+        const dx = -(dxPx / plotWidth) * xSpan
+        const dy = (dyPx / plotHeight) * ySpan
+        return panViewport(current, { dx, dy })
+      })
+    }
+    const onPointerUp = (event) => {
+      if (dragState) canvas.releasePointerCapture(event.pointerId)
+      dragState = null
+    }
+
+    canvas.addEventListener('wheel', onWheel, { passive: false })
+    canvas.addEventListener('pointerdown', onPointerDown)
+    canvas.addEventListener('pointermove', onPointerMove)
+    canvas.addEventListener('pointerup', onPointerUp)
+    return () => {
+      canvas.removeEventListener('wheel', onWheel)
+      canvas.removeEventListener('pointerdown', onPointerDown)
+      canvas.removeEventListener('pointermove', onPointerMove)
+      canvas.removeEventListener('pointerup', onPointerUp)
+    }
+  }, [canvasRef, viewport, setViewport])
+}
+
+function FunctionGraphWidget({ expression, parametricX, parametricY, values }) {
+  const isParametric = !expression && parametricX && parametricY
+  const [t, setT] = useState(0)
   const canvasRef = useRef(null)
 
   const compiled = useMemo(() => compileExpression(expression ?? ''), [expression])
+  const compiledX = useMemo(() => (isParametric ? compileExpression(parametricX) : null), [isParametric, parametricX])
+  const compiledY = useMemo(() => (isParametric ? compileExpression(parametricY) : null), [isParametric, parametricY])
+  const ready = isParametric ? compiledX && compiledY : Boolean(compiled)
 
-  const points = useMemo(
-    () =>
-      compiled
-        ? sampleFunction(compiled, values, -FUNCTION_GRAPH_X_DOMAIN, FUNCTION_GRAPH_X_DOMAIN)
-        : [],
-    [compiled, values]
-  )
+  // Lazy initializer: computed once on mount (i.e. once per widget_id,
+  // since SimulationWidget is keyed by it), not on every parameter-slider
+  // change -- otherwise a manual pan/zoom would snap back to the default
+  // view the instant a slider was nudged.
+  const [viewport, setViewport] = useState(() => {
+    if (isParametric && compiledX && compiledY) {
+      const initial = sampleParametric(compiledX, compiledY, values, ...PARAMETRIC_T_RANGE)
+      const [xMin, xMax] = autoscaleX(initial)
+      const [yMin, yMax] = autoscaleY(initial)
+      return { xMin, xMax, yMin, yMax }
+    }
+    if (compiled) {
+      const initial = sampleFunction(compiled, values, -DEFAULT_X_DOMAIN, DEFAULT_X_DOMAIN)
+      const [yMin, yMax] = autoscaleY(initial)
+      return { xMin: -DEFAULT_X_DOMAIN, xMax: DEFAULT_X_DOMAIN, yMin, yMax }
+    }
+    return { xMin: -DEFAULT_X_DOMAIN, xMax: DEFAULT_X_DOMAIN, yMin: -DEFAULT_X_DOMAIN, yMax: DEFAULT_X_DOMAIN }
+  })
 
-  const y = useMemo(() => (compiled ? evaluateAt(compiled, values, x) : NaN), [compiled, values, x])
+  const points = useMemo(() => {
+    if (isParametric) {
+      return compiledX && compiledY ? sampleParametric(compiledX, compiledY, values, ...PARAMETRIC_T_RANGE) : []
+    }
+    return compiled ? sampleFunction(compiled, values, viewport.xMin, viewport.xMax) : []
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isParametric, compiled, compiledX, compiledY, values, viewport.xMin, viewport.xMax])
+
+  const cursor = useMemo(() => {
+    if (!ready) return null
+    if (isParametric) {
+      return {
+        x: evaluateAt(compiledX, { ...values, t }),
+        y: evaluateAt(compiledY, { ...values, t }),
+      }
+    }
+    return { x: t, y: evaluateAt(compiled, { ...values, x: t }) }
+  }, [ready, isParametric, compiled, compiledX, compiledY, values, t])
+
+  useGraphInteraction(canvasRef, viewport, setViewport)
 
   useEffect(() => {
     const canvas = canvasRef.current
-    if (!canvas || !compiled) return undefined
-
-    const [yMin, yMax] = autoscaleY(points)
+    if (!canvas || !ready) return undefined
 
     // Sized to the parent card's actual available width (not a hardcoded
     // constant) so the graph never overflows its container regardless of
@@ -357,46 +481,61 @@ function FunctionGraphWidget({ expression, values }) {
     const draw = () => {
       canvas.width = canvas.clientWidth
       canvas.height = 160
-      drawFunctionGraph(canvas, { points, x, y, xDomain: FUNCTION_GRAPH_X_DOMAIN, yMin, yMax })
+      drawFunctionGraph(canvas, { points, cursor, viewport, closed: isParametric })
     }
     draw()
 
     window.addEventListener('resize', draw)
     return () => window.removeEventListener('resize', draw)
-  }, [compiled, points, x, y])
+  }, [ready, points, cursor, viewport, isParametric])
 
-  if (!compiled) {
-    return <div className="text-[13px] text-amber-400">Couldn't render this function — the AI's expression didn't parse.</div>
+  if (!ready) {
+    return (
+      <div className="text-[13px] text-amber-400">
+        Couldn't render this function — the AI's expression didn't parse.
+      </div>
+    )
   }
+
+  const sliderMin = isParametric ? PARAMETRIC_T_RANGE[0] : viewport.xMin
+  const sliderMax = isParametric ? PARAMETRIC_T_RANGE[1] : viewport.xMax
 
   return (
     <div>
-      <canvas ref={canvasRef} height={160} className={`${CANVAS_CLASS} h-40 w-full`} />
+      <canvas
+        ref={canvasRef}
+        height={160}
+        className={`${CANVAS_CLASS} h-40 w-full touch-none`}
+      />
       <div className={SLIDER_ROW_CLASS}>
         <div className={SLIDER_ROW_HEADER_CLASS}>
           <label htmlFor="sim-function-graph-x" className={SLIDER_LABEL_CLASS}>
-            x
+            {isParametric ? 't' : 'x'}
           </label>
           <span data-testid="function-graph-y-value" className={SLIDER_VALUE_CLASS}>
-            y = {Number.isFinite(y) ? y.toFixed(2) : 'undefined'}
+            {isParametric
+              ? `(x, y) = (${Number.isFinite(cursor.x) ? cursor.x.toFixed(2) : 'undefined'}, ${
+                  Number.isFinite(cursor.y) ? cursor.y.toFixed(2) : 'undefined'
+                })`
+              : `y = ${Number.isFinite(cursor.y) ? cursor.y.toFixed(2) : 'undefined'}`}
           </span>
         </div>
         <input
           id="sim-function-graph-x"
           type="range"
           className="block w-full"
-          min={-FUNCTION_GRAPH_X_DOMAIN}
-          max={FUNCTION_GRAPH_X_DOMAIN}
-          step={0.1}
-          value={x}
-          onChange={(event) => setX(Number(event.target.value))}
+          min={sliderMin}
+          max={sliderMax}
+          step={(sliderMax - sliderMin) / 200 || 0.1}
+          value={t}
+          onChange={(event) => setT(Number(event.target.value))}
         />
       </div>
     </div>
   )
 }
 
-function SimulationCanvas({ simType, values, expression }) {
+function SimulationCanvas({ simType, values, expression, parametricX, parametricY }) {
   switch (simType) {
     case 'spring_mass':
       return <SpringMassWidget values={values} />
@@ -405,7 +544,14 @@ function SimulationCanvas({ simType, values, expression }) {
     case 'projectile':
       return <ProjectileWidget values={values} />
     case 'function_graph':
-      return <FunctionGraphWidget expression={expression} values={values} />
+      return (
+        <FunctionGraphWidget
+          expression={expression}
+          parametricX={parametricX}
+          parametricY={parametricY}
+          values={values}
+        />
+      )
     default:
       return null
   }
@@ -443,7 +589,13 @@ export function SimulationWidget({ widget }) {
     <div className={CARD_CLASS} data-widget-id={widget.widget_id}>
       <h3 className="font-semibold">{widget.title}</h3>
       <div className={FORMULA_CLASS}>{widget.formula_latex}</div>
-      <SimulationCanvas simType={widget.sim_type} values={values} expression={widget.expression} />
+      <SimulationCanvas
+        simType={widget.sim_type}
+        values={values}
+        expression={widget.expression}
+        parametricX={widget.parametric_x}
+        parametricY={widget.parametric_y}
+      />
       <ParameterSliders parameters={widget.parameters} values={values} onChange={handleChange} />
     </div>
   )

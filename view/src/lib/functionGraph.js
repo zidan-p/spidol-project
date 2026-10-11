@@ -41,24 +41,64 @@ export function sampleFunction(compiled, parameterValues, xMin, xMax, numSamples
   return points
 }
 
-// Picks a y-axis viewport from the actually-sampled points, with padding,
-// rather than assuming a fixed symmetric range -- a quadratic like y = x^2
-// over x in [-10, 10] reaches y = 100, which a fixed [-10, 10] viewport
-// would clip almost entirely.
-export function autoscaleY(points, { paddingRatio = 0.15, fallback = [-10, 10] } = {}) {
-  if (points.length === 0) return fallback
-  let yMin = Infinity
-  let yMax = -Infinity
-  for (const { y } of points) {
-    if (y < yMin) yMin = y
-    if (y > yMax) yMax = y
+// Samples a parametric curve (x(t), y(t)) for t in [tMin, tMax] -- used for
+// function_graph curves that fail the vertical-line test (a circle, ellipse,
+// or any other closed/implicit curve can't be a single y = f(x), so the AI
+// returns two expressions in a parameter t instead; see docs/adr/0006 and
+// the PROMPT_TEXT in server/ai/vision_pipeline.py). Mirrors sampleFunction's
+// error handling: a sample where either expression throws or evaluates
+// non-finite is omitted rather than breaking the whole curve.
+export function sampleParametric(compiledX, compiledY, parameterValues, tMin, tMax, numSamples = 300) {
+  const points = []
+  const step = (tMax - tMin) / (numSamples - 1)
+  for (let i = 0; i < numSamples; i += 1) {
+    const t = tMin + i * step
+    try {
+      const x = compiledX.evaluate({ ...parameterValues, t })
+      const y = compiledY.evaluate({ ...parameterValues, t })
+      if (Number.isFinite(x) && Number.isFinite(y)) points.push({ x, y })
+    } catch {
+      // Domain error at this t -- skip the point.
+    }
   }
-  if (yMin === yMax) {
-    // A constant function (e.g. y = 5) has zero range -- pad around it
-    // instead of returning a zero-height viewport.
-    const pad = Math.max(Math.abs(yMin), 1)
-    return [yMin - pad, yMax + pad]
+  return points
+}
+
+// Picks a [min, max] viewport from a plain array of numbers, with padding,
+// rather than assuming a fixed range -- a quadratic like y = x^2 over x in
+// [-10, 10] reaches y = 100, which a fixed [-10, 10] viewport would clip
+// almost entirely. Shared by both axes: autoscaleY (below) extracts `y`
+// from {x, y} points for the explicit y = f(x) case; a parametric curve's
+// x values need the exact same treatment (a circle's x range is [-r, r],
+// not a fixed domain), so callers extract whichever field they need.
+export function autoscale(values, { paddingRatio = 0.15, fallback = [-10, 10] } = {}) {
+  if (values.length === 0) return fallback
+  let min = Infinity
+  let max = -Infinity
+  for (const v of values) {
+    if (v < min) min = v
+    if (v > max) max = v
   }
-  const padding = (yMax - yMin) * paddingRatio
-  return [yMin - padding, yMax + padding]
+  if (min === max) {
+    // A constant (e.g. y = 5, or a degenerate single-point curve) has zero
+    // range -- pad around it instead of returning a zero-height viewport.
+    const pad = Math.max(Math.abs(min), 1)
+    return [min - pad, max + pad]
+  }
+  const padding = (max - min) * paddingRatio
+  return [min - padding, max + padding]
+}
+
+export function autoscaleY(points, options) {
+  return autoscale(
+    points.map((p) => p.y),
+    options
+  )
+}
+
+export function autoscaleX(points, options) {
+  return autoscale(
+    points.map((p) => p.x),
+    options
+  )
 }

@@ -32,6 +32,8 @@ def test_recognized_simulation_type_builds_ai_widget_spawn():
         "title": "Spring-Mass Harmonic Oscillation",
         "sim_type": "spring_mass",
         "expression": None,
+        "parametric_x": None,
+        "parametric_y": None,
         "parameters": [
             {"key": "k", "label": "Spring Stiffness (N/m)", "min": 10, "max": 100, "val": 45},
             {"key": "m", "label": "Bob Mass (kg)", "min": 0.5, "max": 5.0, "val": 1.2},
@@ -57,6 +59,25 @@ def test_function_graph_spawn_includes_the_expression_field():
 
     assert payload["type"] == "AI_WIDGET_SPAWN"
     assert payload["expression"] == "a*x^2 + b*x + c"
+
+
+def test_function_graph_spawn_includes_parametric_fields():
+    analysis = FormulaAnalysis(
+        formula_latex="x^2 + y^2 = r^2",
+        concept_title="Circle",
+        simulation_type="function_graph",
+        parametric_x="r*cos(t)",
+        parametric_y="r*sin(t)",
+        parameters=[Parameter(key="r", label="Radius (r)", min=1, max=10, val=5)],
+    )
+
+    raw = build_widget_message(analysis, widget_id="widget_04", anchor_x=0.4, anchor_y=0.2)
+    payload = json.loads(raw)
+
+    assert payload["type"] == "AI_WIDGET_SPAWN"
+    assert payload["expression"] is None
+    assert payload["parametric_x"] == "r*cos(t)"
+    assert payload["parametric_y"] == "r*sin(t)"
 
 
 def test_unrecognized_simulation_type_builds_ai_widget_unsupported():

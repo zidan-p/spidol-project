@@ -47,33 +47,48 @@ _MARKDOWN_FENCE_RE = re.compile(r"^```(?:json)?\s*(.*?)\s*```$", re.DOTALL)
 PROMPT_TEXT = (
     "Extract the handwritten physics/math formula in this image. "
     "Classify it as one of: spring_mass, pendulum, projectile (real "
-    "time-evolving physics simulations) -- or, for ANY other formula that "
-    "is a plain single-variable function y = f(x) (linear, quadratic, "
-    "cubic, trigonometric, exponential, logarithmic, rational, etc.), "
-    "classify it as function_graph and additionally return an "
-    '"expression" field: a single-variable algebraic expression SOLVED '
-    "FOR y, in terms of x and your chosen parameter keys, written in "
-    "standard math notation parseable by mathjs (operators + - * / ^, "
-    "functions like sin cos tan sqrt abs exp log, constants pi e). If the "
-    "handwritten formula is implicit or not already isolated for y (e.g. "
-    '"2y = 3x", "ax + by = c"), algebraically rearrange it into explicit '
-    "y = ... form before writing the expression -- never return an "
-    "expression in terms of the original un-isolated coefficients. Use "
-    "conventional names for the parameters of the SOLVED form, not the "
-    'original equation\'s coefficients: linear -> "expression": "m*x + b" '
-    'with parameters keyed "m" (slope), "b" (intercept); quadratic -> '
-    '"expression": "a*x^2 + b*x + c" with parameters keyed "a", "b", "c". '
-    "Return its LaTeX (showing the ORIGINAL handwritten form, not the "
-    "rearranged one), a short concept title, and reasonable adjustable "
-    "parameters with min/max/default values for every constant in the "
-    "SOLVED expression (x itself is never a parameter -- it's the "
-    "interactive slider the UI already provides).\n\n"
+    "time-evolving physics simulations) -- or, for ANY other math formula, "
+    "classify it as function_graph. For function_graph you must then pick "
+    "ONE of two mutually-exclusive representations, choosing based on "
+    "whether the relationship passes the vertical-line test (each x has "
+    "at most one y):\n"
+    "(1) EXPLICIT -- if it's a genuine single-variable function y = f(x) "
+    "(linear, quadratic, cubic, trigonometric, exponential, logarithmic, "
+    "rational, etc.): return an \"expression\" field, a single-variable "
+    "algebraic expression SOLVED FOR y, in terms of x and your chosen "
+    "parameter keys. If the handwritten formula is implicit or not "
+    'already isolated for y (e.g. "2y = 3x", "ax + by = c"), '
+    "algebraically rearrange it into explicit y = ... form first -- never "
+    "return an expression in terms of the original un-isolated "
+    "coefficients. Use conventional names for the parameters of the "
+    'SOLVED form: linear -> "expression": "m*x + b" with parameters '
+    'keyed "m" (slope), "b" (intercept); quadratic -> "expression": '
+    '"a*x^2 + b*x + c" with parameters keyed "a", "b", "c". Leave '
+    '"parametric_x"/"parametric_y" null.\n'
+    "(2) PARAMETRIC -- if it FAILS the vertical-line test (a circle, "
+    "ellipse, or any other closed/implicit curve where some x has two or "
+    "more y values -- e.g. x^2 + y^2 = r^2 is NOT a function and must "
+    'NEVER be forced into "expression" form, which can only ever draw '
+    "half of it): instead return \"parametric_x\" and \"parametric_y\", "
+    "two mathjs expressions in terms of a parameter t (conventionally "
+    'ranging over [0, 2*pi]) that trace the FULL curve, e.g. a circle '
+    'of radius r -> "parametric_x": "r*cos(t)", "parametric_y": '
+    '"r*sin(t)", with a single parameter keyed "r". Leave "expression" '
+    "null in this case.\n\n"
+    "Either way, written in standard math notation parseable by mathjs "
+    "(operators + - * / ^, functions like sin cos tan sqrt abs exp log, "
+    "constants pi e). Return the formula's LaTeX (showing the ORIGINAL "
+    "handwritten form, not any rearranged one), a short concept title, "
+    "and reasonable adjustable parameters with min/max/default values "
+    "for every constant that appears (x and t are never parameters -- "
+    "they're sliders the UI already provides).\n\n"
     "Respond with ONLY a single JSON object (no prose, no markdown code "
     "fence), matching exactly this shape:\n"
     '{"formula_latex": "<latex string>", "concept_title": "<short title>", '
     '"simulation_type": "<snake_case label>", '
-    '"expression": "<mathjs expression or null for spring_mass/pendulum/'
-    'projectile>", '
+    '"expression": "<mathjs expression, or null>", '
+    '"parametric_x": "<mathjs expression, or null>", '
+    '"parametric_y": "<mathjs expression, or null>", '
     '"parameters": [{"key": "<param key>", "label": "<display label>", '
     '"min": <number>, "max": <number>, "val": <number>}, ...]}'
 )
@@ -135,8 +150,19 @@ class FormulaAnalysis(BaseModel):
     # mathjs-parseable expression in terms of `x` and the returned
     # `parameters` keys. None for spring_mass/pendulum/projectile, whose
     # behavior is fully determined by their hand-written RK4 integrators
-    # and don't have (or need) an algebraic expression.
+    # and don't have (or need) an algebraic expression. Also None (in
+    # favor of parametric_x/parametric_y) for function_graph curves that
+    # aren't functions of x -- a circle fails the vertical-line test, so
+    # it can never be a single `expression`; see those fields below.
     expression: str | None = None
+    # Mutually exclusive with `expression`: for a function_graph curve
+    # that isn't a function of x (circle, ellipse, and other closed/
+    # implicit curves), the AI instead returns a parametric form -- two
+    # mathjs expressions in terms of a parameter `t` (conventionally
+    # ranging over [0, 2*pi]), e.g. a circle of radius r becomes
+    # parametric_x="r*cos(t)", parametric_y="r*sin(t)".
+    parametric_x: str | None = None
+    parametric_y: str | None = None
     parameters: list[Parameter]
 
 

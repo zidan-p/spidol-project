@@ -45,8 +45,12 @@ The set of strokes submitted to the AI pipeline on an AI Trigger: every stroke d
 _Avoid_: Recent strokes, time-windowed selection
 
 **Simulation Type**:
-Either a fixed physics type (`spring_mass`, `pendulum`, `projectile`, each driven by a hand-written RK4 integrator — never a general physics engine) or `function_graph` (docs/adr/0006): a deliberately generative exception covering any single-variable `y = f(x)` math (linear, quadratic, trig, exponential, ...), where the AI returns an `expression` evaluated via mathjs rather than a hand-written-per-formula renderer. An unrecognized type (one that isn't a physics type and isn't expressible as `function_graph`) surfaces a "concept detected but not yet supported" state instead of failing.
+Either a fixed physics type (`spring_mass`, `pendulum`, `projectile`, each driven by a hand-written RK4 integrator — never a general physics engine) or `function_graph` (docs/adr/0006): a deliberately generative exception covering any graphable math, where the AI returns either an `expression` (explicit `y = f(x)`, evaluated via mathjs in terms of `x`) or, for a curve that fails the vertical-line test (a circle, ellipse, or other closed/implicit curve — never forced into `expression`, which can only ever draw half of it), `parametric_x`/`parametric_y` (two expressions in terms of a parameter `t`). An unrecognized type (one that isn't a physics type and isn't expressible as `function_graph`) surfaces a "concept detected but not yet supported" state instead of failing.
 _Avoid_: Generative physics simulation, rigid-body physics engine
+
+**Graph Viewport**:
+The function_graph canvas's current `{xMin, xMax, yMin, yMax}` view window (`view/src/lib/graphViewport.js`), distinct from the AI-returned parameter values — pan (drag) and zoom (wheel) on the canvas manipulate only the Graph Viewport, never the curve's own parameters. Initialized once per widget from an auto-scaled default and persists across parameter-slider changes so a manual pan/zoom isn't reset by nudging an unrelated slider.
+_Avoid_: Canvas bounds, plot domain
 
 **Tracking Loss**:
 A brief (under ~150ms) failure of `OpticalColorTracker` to locate the Pen Tip, most commonly caused by the writer's own hand/wrist occluding it during normal strokes — distinct from the Projector Shadow Principle, which only addresses the instructor's body blocking the projector beam. Bridged by interpolating a straight line between the last-known and reacquired points; beyond the threshold, the stroke ends (pen-up) rather than guessing across a long gap.

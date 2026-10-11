@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { autoscaleY, compileExpression, sampleFunction } from '../functionGraph'
+import { autoscaleX, autoscaleY, compileExpression, sampleFunction, sampleParametric } from '../functionGraph'
 
 describe('compileExpression', () => {
   it('compiles a valid mathjs expression', () => {
@@ -46,6 +46,48 @@ describe('sampleFunction', () => {
       { x: 0, y: 0 },
       { x: 1, y: 1 },
     ])
+  })
+})
+
+describe('sampleParametric', () => {
+  it('traces a full circle, not just the upper half (docs/adr/0006)', () => {
+    const x = compileExpression('r*cos(t)')
+    const y = compileExpression('r*sin(t)')
+    const points = sampleParametric(x, y, { r: 2 }, 0, 2 * Math.PI, 5)
+
+    // step = 2pi/4 = pi/2: t=0 -> (2,0), t=pi/2 -> (0,2), t=pi -> (-2,0), t=3pi/2 -> (0,-2)
+    expect(points[0].x).toBeCloseTo(2)
+    expect(points[0].y).toBeCloseTo(0)
+    expect(points[1].x).toBeCloseTo(0)
+    expect(points[1].y).toBeCloseTo(2)
+    expect(points[2].x).toBeCloseTo(-2)
+    expect(points[2].y).toBeCloseTo(0, 5)
+    expect(points[3].x).toBeCloseTo(0)
+    expect(points[3].y).toBeCloseTo(-2)
+  })
+
+  it('skips a sample where either expression is non-finite', () => {
+    const x = compileExpression('t')
+    const y = compileExpression('1/t')
+    const points = sampleParametric(x, y, {}, -1, 1, 3)
+
+    // t=-1 -> (-1,-1), t=0 -> y=1/0=Infinity (skipped), t=1 -> (1,1)
+    expect(points).toEqual([
+      { x: -1, y: -1 },
+      { x: 1, y: 1 },
+    ])
+  })
+})
+
+describe('autoscaleX', () => {
+  it("derives [min, max] from a parametric curve's x values, independent of a fixed domain", () => {
+    const points = [
+      { x: -2, y: 0 },
+      { x: 2, y: 0 },
+    ]
+    const [xMin, xMax] = autoscaleX(points, { paddingRatio: 0 })
+    expect(xMin).toBe(-2)
+    expect(xMax).toBe(2)
   })
 })
 

@@ -130,6 +130,30 @@ describe('SimulationWidget', () => {
     expect(screen.getByTestId('function-graph-y-value')).toHaveTextContent('y = 9.00')
   })
 
+  it('renders a full circle via parametric_x/parametric_y, not just the upper half (docs/adr/0006)', () => {
+    const circle = {
+      ...springMassWidget,
+      sim_type: 'function_graph',
+      expression: null,
+      parametric_x: 'r*cos(t)',
+      parametric_y: 'r*sin(t)',
+      title: 'Circle',
+      formula_latex: 'x^2 + y^2 = r^2',
+      parameters: [{ key: 'r', label: 'Radius (r)', min: 1, max: 10, val: 2 }],
+    }
+    render(<SimulationWidget widget={circle} />)
+
+    // The slider is "t" (the parametric parameter), not "x" -- a circle
+    // has no single x-per-point to drag through.
+    const tSlider = screen.getByLabelText('t')
+    expect(tSlider).toHaveAttribute('min', '0')
+    expect(Number(tSlider.getAttribute('max'))).toBeCloseTo(2 * Math.PI)
+
+    // t=0 -> (x,y) = (r, 0) = (2, 0)
+    fireEvent.change(tSlider, { target: { value: '0' } })
+    expect(screen.getByTestId('function-graph-y-value')).toHaveTextContent('(2.00, 0.00)')
+  })
+
   it('renders a fallback message instead of crashing when the expression fails to parse', () => {
     const malformedExpression = {
       ...springMassWidget,

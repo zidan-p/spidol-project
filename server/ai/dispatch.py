@@ -20,6 +20,8 @@ def build_widget_message(
                 "title": analysis.concept_title,
                 "sim_type": analysis.simulation_type,
                 "expression": analysis.expression,
+                "parametric_x": analysis.parametric_x,
+                "parametric_y": analysis.parametric_y,
                 "parameters": [p.model_dump() for p in analysis.parameters],
             }
         )
