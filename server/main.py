@@ -46,6 +46,7 @@ from hal.image_source import BrowserCanvasImageSource, CameraImageSource
 from hal.providers import BleTouchProvider, KeyboardMockProvider
 from hal.trackers import OpticalColorTracker, SystemMouseFallbackTracker
 from server_app import create_server
+from vision.debug_preview import DebugPreviewTracker
 from vision.homography import HomographyCalibrator
 from vision.tracking_loss import TrackingLossBridge
 
@@ -85,6 +86,17 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         default=0,
         help="OpenCV camera index to open when --tracker=optical-color (RemoteCam "
         "exposes itself as a standard UVC webcam, see docs/adr/0003).",
+    )
+    parser.add_argument(
+        "--debug-camera",
+        action="store_true",
+        help=(
+            "When --tracker=optical-color, pop up a local OpenCV window showing the "
+            "live camera feed with the detected Pen Tip position (or 'NO TARGET') "
+            "burned onto it -- the fastest way to confirm OpticalColorTracker is "
+            "actually seeing the tracked color before trusting the drawing-based "
+            "end-to-end test. No effect in mouse-fallback mode."
+        ),
     )
     parser.add_argument(
         "--ble-address",
@@ -148,9 +160,16 @@ def make_tracker(args: argparse.Namespace):
     """Picks the position-tracking driver: `OpticalColorTracker` if
     `--tracker=optical-color` was given, else the v1 mouse fallback. Mirrors
     `make_touch_provider`'s `--ble-address` selection pattern above.
+
+    `--debug-camera` wraps the optical tracker in `DebugPreviewTracker`
+    (transparent to the telemetry loop -- same `get_position` contract),
+    popping up a local OpenCV preview window of what it's actually seeing.
     """
     if args.tracker == "optical-color":
-        return OpticalColorTracker()
+        tracker = OpticalColorTracker()
+        if args.debug_camera:
+            tracker = DebugPreviewTracker(tracker)
+        return tracker
     return SystemMouseFallbackTracker()
 
 

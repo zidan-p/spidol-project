@@ -8,7 +8,7 @@
 import { Camera, CameraOff, Hand, Wifi, WifiOff } from 'lucide-react'
 
 const FIELD_CLASS =
-  'flex items-center gap-1.5 rounded-full border border-chrome-border bg-chrome-bg px-3 py-1.5 text-xs font-medium text-chrome-muted backdrop-blur-md'
+  'flex items-center gap-1.5 border-chrome-border bg-chrome-bg px-3 py-1.5 text-xs font-medium text-chrome-muted backdrop-blur-md'
 const OK_CLASS = 'text-ok'
 const BAD_CLASS = 'text-danger'
 

@@ -13,7 +13,7 @@ const DASH_STYLES = [
 ]
 
 const LEGEND_CLASS =
-  'flex items-center gap-1.5 text-[11px] font-semibold tracking-wide text-chrome-muted uppercase'
+  'flex items-center gap-1.5 text-[11px] font-semibold tracking-wide text-chrome-muted uppercase mb-2'
 const OPTION_BUTTON_CLASS =
   'rounded-lg border border-transparent bg-white/6 px-2.5 py-1.5 text-xs text-chrome-muted transition-colors hover:bg-white/10 hover:text-chrome-text aria-checked:border-accent aria-checked:bg-accent-soft aria-checked:text-accent'
 

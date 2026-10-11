@@ -8,6 +8,7 @@ from main import make_camera_resources, make_click_handler, make_touch_provider,
 from hal.image_source import BrowserCanvasImageSource, CameraImageSource
 from hal.providers import BleTouchProvider, KeyboardMockProvider
 from hal.trackers import OpticalColorTracker, SystemMouseFallbackTracker
+from vision.debug_preview import DebugPreviewTracker
 from vision.homography import HomographyCalibrator
 from vision.tracking_loss import TrackingLossBridge
 
@@ -92,6 +93,23 @@ def test_make_tracker_returns_optical_color_tracker_when_selected():
     args = parse_args(["--tracker", "optical-color"])
     tracker = make_tracker(args)
     assert isinstance(tracker, OpticalColorTracker)
+
+
+def test_parse_args_defaults_debug_camera_to_false():
+    args = parse_args([])
+    assert args.debug_camera is False
+
+
+def test_make_tracker_wraps_in_debug_preview_tracker_when_flag_set():
+    args = parse_args(["--tracker", "optical-color", "--debug-camera"])
+    tracker = make_tracker(args)
+    assert isinstance(tracker, DebugPreviewTracker)
+
+
+def test_make_tracker_debug_camera_flag_has_no_effect_in_mouse_mode():
+    args = parse_args(["--debug-camera"])
+    tracker = make_tracker(args)
+    assert isinstance(tracker, SystemMouseFallbackTracker)
 
 
 class _FakeVideoCapture:
