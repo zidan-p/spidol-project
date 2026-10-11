@@ -166,7 +166,7 @@ function App() {
           {isAiProcessing && (
             <div
               role="status"
-              className="pointer-events-none absolute top-16 left-1/2 z-11 flex -translate-x-1/2 items-center gap-2 rounded-full border border-accent/35 bg-accent-soft px-4 py-2 text-[13px] font-medium text-accent shadow-[0_8px_24px_rgba(0,0,0,0.45)]"
+              className="pointer-events-none absolute top-25 left-1/2 z-11 flex -translate-x-1/2 items-center gap-2 rounded-full border border-accent/35 bg-accent-soft px-4 py-2 text-[13px] font-medium text-accent shadow-[0_8px_24px_rgba(0,0,0,0.45)]"
             >
               <Loader2 className="animate-spin" aria-hidden="true" size={16} />
               Analyzing your drawing…

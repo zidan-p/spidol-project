@@ -1,7 +1,8 @@
-// Tests for SimulationWidget: renders each fixed Simulation Type with
-// mouse-editable parameter sliders (SPEC.md 3.3 Simulation Widgets), and a
-// distinct state for AI_WIDGET_UNSUPPORTED (ticket 04) instead of crashing
-// or silently doing nothing.
+// Tests for SimulationWidget: renders each fixed Simulation Type (SPEC.md
+// 3.3 Simulation Widgets), and a distinct state for AI_WIDGET_UNSUPPORTED
+// (ticket 04) instead of crashing or silently doing nothing. Per-formula
+// parameter sliders (m/b, radius, k/m, ...) are deliberately not rendered --
+// the curve/simulation always uses the AI's own default values.
 import { fireEvent, render, screen } from '@testing-library/react'
 import { describe, expect, it } from 'vitest'
 import { SimulationWidget } from '../SimulationWidget'
@@ -38,53 +39,37 @@ describe('SimulationWidget', () => {
     expect(screen.getByText('F = -kx')).toBeInTheDocument()
   })
 
-  it('renders one slider per parameter, bound to its min/max/default value', () => {
-    render(<SimulationWidget widget={springMassWidget} />)
-
-    const kSlider = screen.getByLabelText('Spring Stiffness (N/m)')
-    expect(kSlider).toHaveAttribute('type', 'range')
-    expect(kSlider).toHaveAttribute('min', '10')
-    expect(kSlider).toHaveAttribute('max', '100')
-    expect(kSlider.value).toBe('45')
-
-    const mSlider = screen.getByLabelText('Bob Mass (kg)')
-    expect(mSlider.value).toBe('1.2')
-  })
-
-  it('updates the displayed parameter value when a slider is dragged', () => {
-    render(<SimulationWidget widget={springMassWidget} />)
-
-    const kSlider = screen.getByLabelText('Spring Stiffness (N/m)')
-    fireEvent.change(kSlider, { target: { value: '80' } })
-
-    expect(screen.getByTestId('param-value-k')).toHaveTextContent('80')
-  })
-
   it('renders a canvas for the live simulation render', () => {
     const { container } = render(<SimulationWidget widget={springMassWidget} />)
     expect(container.querySelector('canvas')).toBeTruthy()
   })
 
   it('renders pendulum and projectile sim types too', () => {
-    const pendulum = { ...springMassWidget, sim_type: 'pendulum', parameters: [
-      { key: 'g', label: 'Gravity (m/s^2)', min: 1, max: 20, val: 9.8 },
-      { key: 'L', label: 'Length (m)', min: 0.1, max: 3, val: 1 },
-    ] }
+    const pendulum = {
+      ...springMassWidget,
+      sim_type: 'pendulum',
+      parameters: [
+        { key: 'g', label: 'Gravity (m/s^2)', min: 1, max: 20, val: 9.8 },
+        { key: 'L', label: 'Length (m)', min: 0.1, max: 3, val: 1 },
+      ],
+    }
     const { rerender, container } = render(<SimulationWidget widget={pendulum} />)
     expect(container.querySelector('canvas')).toBeTruthy()
-    expect(screen.getByLabelText('Gravity (m/s^2)')).toBeInTheDocument()
 
-    const projectile = { ...springMassWidget, sim_type: 'projectile', parameters: [
-      { key: 'v0', label: 'Launch Speed (m/s)', min: 1, max: 50, val: 20 },
-      { key: 'angle', label: 'Launch Angle (deg)', min: 0, max: 90, val: 45 },
-      { key: 'g', label: 'Gravity (m/s^2)', min: 1, max: 20, val: 9.8 },
-    ] }
+    const projectile = {
+      ...springMassWidget,
+      sim_type: 'projectile',
+      parameters: [
+        { key: 'v0', label: 'Launch Speed (m/s)', min: 1, max: 50, val: 20 },
+        { key: 'angle', label: 'Launch Angle (deg)', min: 0, max: 90, val: 45 },
+        { key: 'g', label: 'Gravity (m/s^2)', min: 1, max: 20, val: 9.8 },
+      ],
+    }
     rerender(<SimulationWidget widget={projectile} />)
     expect(container.querySelector('canvas')).toBeTruthy()
-    expect(screen.getByLabelText('Launch Angle (deg)')).toBeInTheDocument()
   })
 
-  it('renders a linear function_graph with an m/b slider pair and an interactive x slider', () => {
+  it('renders a linear function_graph with an interactive x slider and live y readout', () => {
     const linearFunction = {
       ...springMassWidget,
       sim_type: 'function_graph',
@@ -99,8 +84,6 @@ describe('SimulationWidget', () => {
     const { container } = render(<SimulationWidget widget={linearFunction} />)
 
     expect(container.querySelector('canvas')).toBeTruthy()
-    expect(screen.getByLabelText('Slope (m)')).toHaveValue('2')
-    expect(screen.getByLabelText('Intercept (b)')).toHaveValue('0')
 
     const xSlider = screen.getByLabelText('x')
     expect(xSlider).toHaveAttribute('type', 'range')

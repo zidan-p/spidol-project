@@ -12,8 +12,9 @@
 // ways that couldn't be fully diagnosed without real-browser access; a
 // renderer we fully control and can actually verify end-to-end won out
 // over a nicer-looking but unverifiable third-party one.
-// All sim types have real-time parameter sliders editable via mouse. A
-// distinct "concept detected but not yet supported" state is rendered for
+// Per-formula parameter sliders (m/b, radius, k/m, ...) are deliberately
+// not rendered -- the curve/simulation always uses the AI's own default
+// values. A distinct "concept detected but not yet supported" state is rendered for
 // AI_WIDGET_UNSUPPORTED (and, defensively, for any AI_WIDGET_SPAWN whose
 // sim_type isn't one of these) rather than crashing or doing nothing.
 import { useEffect, useMemo, useRef, useState } from 'react'
@@ -26,19 +27,18 @@ import {
   sampleParametric,
 } from '../lib/functionGraph'
 import { panViewport, zoomViewport } from '../lib/graphViewport'
-import { decimalPlacesForStep, niceStep } from '../lib/niceStep'
 import { pendulumAccel, projectileStep, rk4Step, springMassAccel } from '../lib/rk4'
 
 const SUPPORTED_SIM_TYPES = new Set(['spring_mass', 'pendulum', 'projectile', 'function_graph'])
 
 const CARD_CLASS =
-  'pointer-events-auto absolute top-[10%] bottom-[10%] right-[5%] w-70 rounded-2xl border border-chrome-border bg-chrome-bg p-4 px-4.5 text-[13px] text-chrome-text shadow-[0_8px_24px_rgba(0,0,0,0.45)] backdrop-blur-lg accent-accent'
+  'pointer-events-auto absolute  bottom-[2%] right-[1%] w-100 rounded-2xl border border-chrome-border bg-chrome-bg text-[13px] text-chrome-text shadow-[0_8px_24px_rgba(0,0,0,0.45)] backdrop-blur-lg accent-accent'
 const FORMULA_CLASS = 'my-1.5 font-mono text-chrome-muted'
-const SLIDER_ROW_CLASS = 'my-2.5'
+const SLIDER_ROW_CLASS = 'my-2.5 px-2'
 const SLIDER_ROW_HEADER_CLASS = 'mb-1 flex items-baseline justify-between gap-2'
 const SLIDER_LABEL_CLASS = 'text-[11px] text-chrome-muted'
 const SLIDER_VALUE_CLASS = 'text-xs font-semibold text-chrome-text'
-const CANVAS_CLASS = 'my-2 block rounded bg-[#0a0a0a]'
+const CANVAS_CLASS = 'my-0 block rounded bg-[#0a0a0a]'
 
 function parametersToState(parameters) {
   const state = {}
@@ -48,44 +48,6 @@ function parametersToState(parameters) {
   return state
 }
 
-function ParameterSliders({ parameters, values, onChange }) {
-  return (
-    <div>
-      {parameters.map((param) => {
-        // A "nice" (1/2/5 x 10^n) step instead of the raw (max-min)/200:
-        // that produced awkward steps like 0.45, so dragging the slider
-        // drifted unpredictably between clean integers and long decimal
-        // tails. See lib/niceStep.js.
-        const step = niceStep(param.min, param.max)
-        const decimals = decimalPlacesForStep(step)
-        return (
-          <div className={SLIDER_ROW_CLASS} key={param.key}>
-            <div className={SLIDER_ROW_HEADER_CLASS}>
-              <label htmlFor={`sim-param-${param.key}`} className={SLIDER_LABEL_CLASS}>
-                {param.label}
-              </label>
-              <span data-testid={`param-value-${param.key}`} className={SLIDER_VALUE_CLASS}>
-                {values[param.key]}
-              </span>
-            </div>
-            <input
-              id={`sim-param-${param.key}`}
-              type="range"
-              className="block w-full"
-              min={param.min}
-              max={param.max}
-              step={step}
-              value={values[param.key]}
-              onChange={(event) =>
-                onChange(param.key, Number(Number(event.target.value).toFixed(decimals)))
-              }
-            />
-          </div>
-        )
-      })}
-    </div>
-  )
-}
 
 // Shared canvas render loop: draws whatever `draw(ctx, state, width, height)`
 // wants, advancing `state` one RK4 sub-step at a time via `step`. Kept
@@ -156,7 +118,7 @@ function SpringMassWidget({ values }) {
     },
     [k, m]
   )
-  return <canvas ref={canvasRef} width={240} height={160} className={CANVAS_CLASS} />
+  return <canvas ref={canvasRef} width={240} height={250} className={CANVAS_CLASS} />
 }
 
 function PendulumWidget({ values }) {
@@ -440,31 +402,33 @@ function useMarkerGraphInteraction(canvasRef, latestTrackRef, viewportRef, setVi
     if (!canvas || !latestTrackRef) return undefined
 
     let rafId
-    let wasInsideAndTouching = false
+    let wasTouchingGlobally = false
+    // Whether the CURRENT touch gesture (from press to release) belongs to
+    // this widget -- decided ONCE at the true rising edge of `is_touching`
+    // (a fresh press, not merely "position re-entered the bounds"), and
+    // held fixed for the gesture's whole duration. Without this, a
+    // whiteboard stroke that starts elsewhere and merely sweeps across the
+    // widget's on-screen area mid-drag would be misread as a fresh press
+    // here on every frame its position happens to overlap, hijacking pan
+    // with the stroke's own movement -- exactly the bug this guards
+    // against. Mirrors useDrawSuppression's "decided once at pointerdown"
+    // principle for the analogous whiteboard-vs-chrome ambiguity.
+    let gestureOwnsWidget = false
     let lastScreen = null
     let lastTap = null // { time, x, y }
 
     const loop = () => {
       const message = latestTrackRef.current
-      const rect = canvas.getBoundingClientRect()
-      const insideAndTouching =
-        message?.is_detected &&
-        message.is_touching &&
-        (() => {
-          const screenX = message.x * window.innerWidth
-          const screenY = message.y * window.innerHeight
-          return (
-            screenX >= rect.left && screenX <= rect.right && screenY >= rect.top && screenY <= rect.bottom
-          )
-        })()
+      const touchingNow = Boolean(message?.is_detected && message.is_touching)
 
-      if (insideAndTouching) {
+      if (touchingNow && !wasTouchingGlobally) {
+        const rect = canvas.getBoundingClientRect()
         const screenX = message.x * window.innerWidth
         const screenY = message.y * window.innerHeight
+        gestureOwnsWidget =
+          screenX >= rect.left && screenX <= rect.right && screenY >= rect.top && screenY <= rect.bottom
 
-        if (!wasInsideAndTouching) {
-          // Rising edge (a new press inside the graph) -- check for a
-          // double-tap before starting a fresh drag.
+        if (gestureOwnsWidget) {
           const now = performance.now()
           if (
             lastTap &&
@@ -481,27 +445,38 @@ function useMarkerGraphInteraction(canvasRef, latestTrackRef, viewportRef, setVi
             const [cx, cy] = toData(screenX - rect.left, screenY - rect.top)
             setViewport((current) => zoomViewport(current, { cx, cy, factor: DOUBLE_TAP_ZOOM_FACTOR }))
             lastTap = null
+            // The double-tap itself isn't a drag -- don't also start
+            // panning from this same press.
+            gestureOwnsWidget = false
           } else {
             lastTap = { time: now, x: screenX, y: screenY }
           }
-        } else if (lastScreen) {
-          const plotWidth = canvas.width - GRAPH_MARGIN
-          const plotHeight = canvas.height - GRAPH_MARGIN - 4
-          const dxPx = screenX - lastScreen.x
-          const dyPx = screenY - lastScreen.y
-          setViewport((current) => {
-            const xSpan = current.xMax - current.xMin
-            const ySpan = current.yMax - current.yMin
-            const dx = -(dxPx / plotWidth) * xSpan
-            const dy = (dyPx / plotHeight) * ySpan
-            return panViewport(current, { dx, dy })
-          })
         }
+        lastScreen = gestureOwnsWidget ? { x: screenX, y: screenY } : null
+      } else if (touchingNow && gestureOwnsWidget && lastScreen) {
+        // Continuing a gesture this widget already owns -- pan regardless
+        // of whether the position has since drifted outside the bounds
+        // (normal drag behavior); bounds are never re-checked mid-gesture.
+        const screenX = message.x * window.innerWidth
+        const screenY = message.y * window.innerHeight
+        const plotWidth = canvas.width - GRAPH_MARGIN
+        const plotHeight = canvas.height - GRAPH_MARGIN - 4
+        const dxPx = screenX - lastScreen.x
+        const dyPx = screenY - lastScreen.y
         lastScreen = { x: screenX, y: screenY }
-      } else {
+        setViewport((current) => {
+          const xSpan = current.xMax - current.xMin
+          const ySpan = current.yMax - current.yMin
+          const dx = -(dxPx / plotWidth) * xSpan
+          const dy = (dyPx / plotHeight) * ySpan
+          return panViewport(current, { dx, dy })
+        })
+      } else if (!touchingNow) {
+        gestureOwnsWidget = false
         lastScreen = null
       }
-      wasInsideAndTouching = insideAndTouching
+
+      wasTouchingGlobally = touchingNow
       rafId = requestAnimationFrame(loop)
     }
     rafId = requestAnimationFrame(loop)
@@ -598,8 +573,8 @@ function FunctionGraphWidget({ expression, parametricX, parametricY, values, lat
     <div>
       <canvas
         ref={canvasRef}
-        height={160}
-        className={`${CANVAS_CLASS} h-40 w-full touch-none`}
+        height={200}
+        className={`${CANVAS_CLASS} h-100 w-full touch-none`}
       />
       <div className={SLIDER_ROW_CLASS}>
         <div className={SLIDER_ROW_HEADER_CLASS}>
@@ -608,9 +583,8 @@ function FunctionGraphWidget({ expression, parametricX, parametricY, values, lat
           </label>
           <span data-testid="function-graph-y-value" className={SLIDER_VALUE_CLASS}>
             {isParametric
-              ? `(x, y) = (${Number.isFinite(cursor.x) ? cursor.x.toFixed(2) : 'undefined'}, ${
-                  Number.isFinite(cursor.y) ? cursor.y.toFixed(2) : 'undefined'
-                })`
+              ? `(x, y) = (${Number.isFinite(cursor.x) ? cursor.x.toFixed(2) : 'undefined'}, ${Number.isFinite(cursor.y) ? cursor.y.toFixed(2) : 'undefined'
+              })`
               : `y = ${Number.isFinite(cursor.y) ? cursor.y.toFixed(2) : 'undefined'}`}
           </span>
         </div>
@@ -667,7 +641,10 @@ function UnsupportedWidget({ widget }) {
 }
 
 export function SimulationWidget({ widget, latestTrackRef }) {
-  const [values, setValues] = useState(() => parametersToState(widget.parameters ?? []))
+  // No slider controls for the formula's own parameters (m/b, radius, k/m,
+  // ...) -- the curve/simulation always runs with the AI's own default
+  // values, so this never needs to change after mount.
+  const values = parametersToState(widget.parameters ?? [])
 
   const isSpawnable =
     widget.type === 'AI_WIDGET_SPAWN' && SUPPORTED_SIM_TYPES.has(widget.sim_type)
@@ -676,14 +653,8 @@ export function SimulationWidget({ widget, latestTrackRef }) {
     return <UnsupportedWidget widget={widget} />
   }
 
-  const handleChange = (key, value) => {
-    setValues((prev) => ({ ...prev, [key]: value }))
-  }
-
   return (
     <div className={CARD_CLASS} data-widget-id={widget.widget_id}>
-      <h3 className="font-semibold">{widget.title}</h3>
-      <div className={FORMULA_CLASS}>{widget.formula_latex}</div>
       <SimulationCanvas
         simType={widget.sim_type}
         values={values}
@@ -692,7 +663,10 @@ export function SimulationWidget({ widget, latestTrackRef }) {
         parametricY={widget.parametric_y}
         latestTrackRef={latestTrackRef}
       />
-      <ParameterSliders parameters={widget.parameters} values={values} onChange={handleChange} />
+      <div className="px-2">
+        <h3 className="font-semibold">{widget.title}</h3>
+        <div className={FORMULA_CLASS}>{widget.formula_latex}</div>
+      </div>
     </div>
   )
 }
