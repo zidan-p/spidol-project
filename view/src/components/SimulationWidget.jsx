@@ -17,6 +17,8 @@
 // values. A distinct "concept detected but not yet supported" state is rendered for
 // AI_WIDGET_UNSUPPORTED (and, defensively, for any AI_WIDGET_SPAWN whose
 // sim_type isn't one of these) rather than crashing or doing nothing.
+import katex from 'katex'
+import 'katex/dist/katex.min.css'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { niceTicks } from '../lib/axisTicks'
 import {
@@ -29,6 +31,7 @@ import {
 } from '../lib/functionGraph'
 import { panViewport, zoomViewport } from '../lib/graphViewport'
 import { pendulumAccel, projectileStep, rk4Step, springMassAccel } from '../lib/rk4'
+import { traceSmoothPath } from '../lib/smoothPath'
 
 const SUPPORTED_SIM_TYPES = new Set(['spring_mass', 'pendulum', 'projectile', 'function_graph'])
 
@@ -256,40 +259,6 @@ function makeProjection(viewport, plotLeft, plotRight, plotTop, plotBottom) {
     toData(px, py) {
       return [xMin + ((px - plotLeft) / plotWidth) * xSpan, yMin + ((plotBottom - py) / plotHeight) * ySpan]
     },
-  }
-}
-
-// Traces `pixelPoints` ([px, py] pairs, already projected) as a smooth
-// curve instead of straight segments between raw samples -- the classic
-// "quadratic curve through midpoints" technique: each sampled point
-// becomes a control point pulling the curve toward it, while the curve
-// itself passes through the midpoint of each consecutive pair, so corners
-// get rounded rather than kinked. Purely cosmetic -- the underlying sample
-// points (and therefore the math) are unchanged; only the strokeback
-// path between them is smoothed. `closed` additionally smooths the
-// wrap-around segment (parametric curves like a circle) instead of
-// leaving a sharp seam where the path loops back to its start.
-function traceSmoothPath(ctx, pixelPoints, closed) {
-  const n = pixelPoints.length
-  if (n === 0) return
-  if (n === 1) {
-    ctx.moveTo(...pixelPoints[0])
-    return
-  }
-  const mid = (a, b) => [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2]
-
-  if (closed) {
-    ctx.moveTo(...mid(pixelPoints[n - 1], pixelPoints[0]))
-    for (let i = 0; i < n; i += 1) {
-      const next = pixelPoints[(i + 1) % n]
-      ctx.quadraticCurveTo(...pixelPoints[i], ...mid(pixelPoints[i], next))
-    }
-  } else {
-    ctx.moveTo(...pixelPoints[0])
-    for (let i = 1; i < n - 1; i += 1) {
-      ctx.quadraticCurveTo(...pixelPoints[i], ...mid(pixelPoints[i], pixelPoints[i + 1]))
-    }
-    ctx.lineTo(...pixelPoints[n - 1])
   }
 }
 
@@ -693,6 +662,20 @@ function SimulationCanvas({
   }
 }
 
+// Renders the AI's own `formula_latex` (e.g. "\int_{0}^{1} 2x \, dx") as
+// actual typeset math via KaTeX instead of showing the raw LaTeX source
+// text. `throwOnError: false` degrades to KaTeX's own inline error span
+// instead of crashing the widget, since this string is AI-generated and
+// was never guaranteed to be syntactically valid LaTeX. KaTeX's output is
+// its own generated markup (fonts/spacing spans), not arbitrary untrusted
+// HTML, so injecting it via dangerouslySetInnerHTML is the library's
+// standard usage, not a sanitization risk.
+function RenderedFormula({ latex, className }) {
+  if (!latex) return null
+  const html = katex.renderToString(latex, { throwOnError: false, displayMode: false })
+  return <div className={className} dangerouslySetInnerHTML={{ __html: html }} />
+}
+
 function UnsupportedWidget({ widget }) {
   const title = widget.title ?? 'Unknown concept'
   const formula = widget.formula_latex
@@ -701,7 +684,7 @@ function UnsupportedWidget({ widget }) {
   return (
     <div className={`${CARD_CLASS} border-amber-800 text-amber-400`} data-widget-id={widget.widget_id}>
       <h3 className="font-semibold">{title}</h3>
-      {formula && <div className={FORMULA_CLASS}>{formula}</div>}
+      <RenderedFormula latex={formula} className={FORMULA_CLASS} />
       <p className="text-[13px]">Concept detected, but not yet supported ({attemptedSimType}).</p>
     </div>
   )
@@ -734,7 +717,7 @@ export function SimulationWidget({ widget, latestTrackRef }) {
       />
       <div className="px-2">
         <h3 className="font-semibold">{widget.title}</h3>
-        <div className={FORMULA_CLASS}>{widget.formula_latex}</div>
+        <RenderedFormula latex={widget.formula_latex} className={FORMULA_CLASS} />
       </div>
     </div>
   )

@@ -32,11 +32,16 @@ const unsupportedWidget = {
 }
 
 describe('SimulationWidget', () => {
-  it('renders the formula and title for a recognized sim_type', () => {
-    render(<SimulationWidget widget={springMassWidget} />)
+  it('renders the formula (as typeset math, not raw LaTeX source) and title for a recognized sim_type', () => {
+    const { container } = render(<SimulationWidget widget={springMassWidget} />)
 
     expect(screen.getByText('Spring-Mass Harmonic Oscillation')).toBeInTheDocument()
-    expect(screen.getByText('F = -kx')).toBeInTheDocument()
+    // formula_latex is rendered via KaTeX, not as a plain-text node -- assert
+    // on the typeset math container (and its hidden MathML source, which
+    // KaTeX always includes) rather than an exact rendered-text match, since
+    // KaTeX fragments the glyphs across many nested spans.
+    expect(container.querySelector('.katex')).toBeTruthy()
+    expect(container.querySelector('annotation').textContent).toBe('F = -kx')
   })
 
   it('renders a canvas for the live simulation render', () => {
@@ -181,11 +186,12 @@ describe('SimulationWidget', () => {
   })
 
   it('renders a distinct "concept detected but not yet supported" state for AI_WIDGET_UNSUPPORTED', () => {
-    render(<SimulationWidget widget={unsupportedWidget} />)
+    const { container } = render(<SimulationWidget widget={unsupportedWidget} />)
 
     expect(screen.getByText(/not yet supported/i)).toBeInTheDocument()
     expect(screen.getByText('Wave Equation')).toBeInTheDocument()
-    expect(screen.getByText('\\nabla^2 \\psi = 0')).toBeInTheDocument()
+    expect(container.querySelector('.katex')).toBeTruthy()
+    expect(container.querySelector('annotation').textContent).toBe('\\nabla^2 \\psi = 0')
     expect(screen.queryByRole('slider')).not.toBeInTheDocument()
   })
 

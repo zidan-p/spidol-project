@@ -17,6 +17,7 @@ import { useDrawSuppression } from '../hooks/useDrawSuppression'
 import { createStrokeBuffer, ingestTrackUpdate } from '../lib/strokeBuffer'
 import { strokeSegments } from '../lib/strokeGeometry'
 import { canRedo, canUndo, commitAction, createHistory, redo, undo } from '../lib/strokeHistory'
+import { traceSmoothPath } from '../lib/smoothPath'
 
 const DASH_PATTERNS = {
   solid: [],
@@ -68,8 +69,25 @@ function drawStroke(ctx, stroke, width, height) {
   ctx.lineWidth = stroke.width
   ctx.setLineDash(DASH_PATTERNS[stroke.dash] ?? [])
 
-  const segments = strokeSegments(stroke)
-  pathForSegments(ctx, segments, width, height)
+  if (stroke.tool === 'pen' && stroke.points.length > 1) {
+    // Freehand ink (e.g. circling a formula to select it for the AI
+    // Trigger) comes in as raw tracked points -- drawing a straight lineTo
+    // between each one makes the stroke look jagged/faceted instead of a
+    // smooth hand-drawn line. Smoothed the same way the function_graph
+    // curve already is (quadratic-curve-through-midpoints, lib/smoothPath).
+    // Shape tools (rectangle/ellipse/line/arrow) stay crisp/geometric --
+    // this only applies to actual freehand drawing.
+    ctx.beginPath()
+    traceSmoothPath(
+      ctx,
+      stroke.points.map((p) => [p.x * width, p.y * height]),
+      false
+    )
+    ctx.stroke()
+  } else {
+    const segments = strokeSegments(stroke)
+    pathForSegments(ctx, segments, width, height)
+  }
 
   if (stroke.tool === 'arrow' && stroke.points.length >= 2) {
     drawArrowhead(ctx, stroke.points[0], stroke.points[1], width, height)
