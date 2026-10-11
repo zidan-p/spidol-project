@@ -137,6 +137,37 @@ describe('SimulationWidget', () => {
     expect(screen.getByTestId('function-graph-y-value')).toHaveTextContent('(2.00, 0.00)')
   })
 
+  it('renders the computed value for a definite integral (matches the worked answer)', () => {
+    const integral = {
+      ...springMassWidget,
+      sim_type: 'function_graph',
+      expression: '2*x + 1',
+      integral_lower: 0,
+      integral_upper: 1,
+      title: 'Definite Integral of a Linear Function',
+      formula_latex: '\\int_{0}^{1} (2x + 1) \\, dx',
+      parameters: [],
+    }
+    render(<SimulationWidget widget={integral} />)
+
+    // integral of 2x+1 from 0 to 1 = [x^2 + x] from 0 to 1 = 2
+    expect(screen.getByTestId('function-graph-integral-value')).toHaveTextContent('= 2.00')
+  })
+
+  it('does not render an integral readout for a plain function with no integral bounds', () => {
+    const plain = {
+      ...springMassWidget,
+      sim_type: 'function_graph',
+      expression: '2*x + 1',
+      title: 'Linear Function',
+      formula_latex: 'y = 2x + 1',
+      parameters: [],
+    }
+    render(<SimulationWidget widget={plain} />)
+
+    expect(screen.queryByTestId('function-graph-integral-value')).not.toBeInTheDocument()
+  })
+
   it('renders a fallback message instead of crashing when the expression fails to parse', () => {
     const malformedExpression = {
       ...springMassWidget,

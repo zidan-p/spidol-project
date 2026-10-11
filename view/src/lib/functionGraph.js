@@ -102,3 +102,35 @@ export function autoscaleX(points, options) {
     options
   )
 }
+
+// Numerically evaluates the definite integral of `compiled` from `a` to
+// `b` via the composite trapezoidal rule, for a function_graph whose
+// handwritten formula was an explicit definite integral (e.g.
+// "\int_{0}^{1} (2x+1) dx" -- GLOSSARY.md, server/ai/vision_pipeline.py's
+// integral_lower/integral_upper). A sample that throws or evaluates
+// non-finite contributes nothing for that sub-interval rather than
+// making the whole result NaN -- consistent with sampleFunction's
+// domain-error handling.
+export function definiteIntegral(compiled, parameterValues, a, b, numSamples = 400) {
+  if (a === b) return 0
+  const lo = Math.min(a, b)
+  const hi = Math.max(a, b)
+  const step = (hi - lo) / numSamples
+  const evaluate = (x) => {
+    try {
+      const y = compiled.evaluate({ ...parameterValues, x })
+      return Number.isFinite(y) ? y : 0
+    } catch {
+      return 0
+    }
+  }
+
+  let sum = 0
+  let previous = evaluate(lo)
+  for (let i = 1; i <= numSamples; i += 1) {
+    const current = evaluate(lo + i * step)
+    sum += ((previous + current) / 2) * step
+    previous = current
+  }
+  return a <= b ? sum : -sum
+}

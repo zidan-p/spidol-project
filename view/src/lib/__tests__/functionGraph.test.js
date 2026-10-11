@@ -1,5 +1,12 @@
 import { describe, expect, it } from 'vitest'
-import { autoscaleX, autoscaleY, compileExpression, sampleFunction, sampleParametric } from '../functionGraph'
+import {
+  autoscaleX,
+  autoscaleY,
+  compileExpression,
+  definiteIntegral,
+  sampleFunction,
+  sampleParametric,
+} from '../functionGraph'
 
 describe('compileExpression', () => {
   it('compiles a valid mathjs expression', () => {
@@ -111,5 +118,35 @@ describe('autoscaleY', () => {
 
   it('falls back to a default viewport when there are no valid points', () => {
     expect(autoscaleY([], { fallback: [-10, 10] })).toEqual([-10, 10])
+  })
+})
+
+describe('definiteIntegral', () => {
+  it('computes the integral of a linear function matching the worked answer (2x+1 from 0 to 1 = 2)', () => {
+    const compiled = compileExpression('2*x + 1')
+    expect(definiteIntegral(compiled, {}, 0, 1)).toBeCloseTo(2, 2)
+  })
+
+  it('computes the integral of a quadratic (x^2 from 0 to 3 = 9)', () => {
+    const compiled = compileExpression('x^2')
+    expect(definiteIntegral(compiled, {}, 0, 3)).toBeCloseTo(9, 1)
+  })
+
+  it('merges parameter values into the evaluation scope', () => {
+    const compiled = compileExpression('m*x + b')
+    // m*x+b from 0 to 2 with m=3,b=1 -> [1.5x^2+x] from 0 to2 = 6+2=8
+    expect(definiteIntegral(compiled, { m: 3, b: 1 }, 0, 2)).toBeCloseTo(8, 1)
+  })
+
+  it('returns 0 for a zero-width interval', () => {
+    const compiled = compileExpression('x^2')
+    expect(definiteIntegral(compiled, {}, 5, 5)).toBe(0)
+  })
+
+  it('negates the result when bounds are given in reverse order', () => {
+    const compiled = compileExpression('2*x + 1')
+    const forward = definiteIntegral(compiled, {}, 0, 1)
+    const reversed = definiteIntegral(compiled, {}, 1, 0)
+    expect(reversed).toBeCloseTo(-forward, 5)
   })
 })

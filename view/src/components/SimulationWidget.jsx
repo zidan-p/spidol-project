@@ -23,6 +23,7 @@ import {
   autoscaleX,
   autoscaleY,
   compileExpression,
+  definiteIntegral,
   sampleFunction,
   sampleParametric,
 } from '../lib/functionGraph'
@@ -292,7 +293,7 @@ function traceSmoothPath(ctx, pixelPoints, closed) {
   }
 }
 
-function drawFunctionGraph(canvas, { points, cursor, viewport, closed }) {
+function drawFunctionGraph(canvas, { points, cursor, viewport, closed, shadePoints }) {
   const ctx = canvas.getContext('2d')
   if (!ctx) return
   const { width, height } = canvas
@@ -338,6 +339,25 @@ function drawFunctionGraph(canvas, { points, cursor, viewport, closed }) {
     ctx.moveTo(axX0, axY0)
     ctx.lineTo(axX1, axY1)
     ctx.stroke()
+  }
+
+  // Shaded area under the curve for a definite integral (GLOSSARY.md,
+  // server/ai/vision_pipeline.py's integral_lower/integral_upper) --
+  // drawn before the curve stroke so the line stays crisp on top of it.
+  if (shadePoints && shadePoints.length > 1) {
+    ctx.fillStyle = 'rgba(199, 146, 234, 0.28)'
+    ctx.beginPath()
+    const [startX, startY] = toPx(shadePoints[0].x, 0)
+    ctx.moveTo(startX, startY)
+    for (const p of shadePoints) {
+      const [px, py] = toPx(p.x, p.y)
+      ctx.lineTo(px, py)
+    }
+    const last = shadePoints[shadePoints.length - 1]
+    const [endX, endY] = toPx(last.x, 0)
+    ctx.lineTo(endX, endY)
+    ctx.closePath()
+    ctx.fill()
   }
 
   ctx.strokeStyle = '#c792ea'
@@ -484,8 +504,17 @@ function useMarkerGraphInteraction(canvasRef, latestTrackRef, viewportRef, setVi
   }, [canvasRef, latestTrackRef, viewportRef, setViewport])
 }
 
-function FunctionGraphWidget({ expression, parametricX, parametricY, values, latestTrackRef }) {
+function FunctionGraphWidget({
+  expression,
+  parametricX,
+  parametricY,
+  integralLower,
+  integralUpper,
+  values,
+  latestTrackRef,
+}) {
   const isParametric = !expression && parametricX && parametricY
+  const hasIntegral = !isParametric && Number.isFinite(integralLower) && Number.isFinite(integralUpper)
   const [t, setT] = useState(0)
   const canvasRef = useRef(null)
 
@@ -497,7 +526,10 @@ function FunctionGraphWidget({ expression, parametricX, parametricY, values, lat
   // Lazy initializer: computed once on mount (i.e. once per widget_id,
   // since SimulationWidget is keyed by it), not on every parameter-slider
   // change -- otherwise a manual pan/zoom would snap back to the default
-  // view the instant a slider was nudged.
+  // view the instant a slider was nudged. When a definite integral's
+  // bounds fall outside the default domain, the initial view is widened
+  // to include them -- otherwise the very thing the formula asked about
+  // could start out scrolled off-screen.
   const [viewport, setViewport] = useState(() => {
     if (isParametric && compiledX && compiledY) {
       const initial = sampleParametric(compiledX, compiledY, values, ...PARAMETRIC_T_RANGE)
@@ -506,9 +538,11 @@ function FunctionGraphWidget({ expression, parametricX, parametricY, values, lat
       return { xMin, xMax, yMin, yMax }
     }
     if (compiled) {
-      const initial = sampleFunction(compiled, values, -DEFAULT_X_DOMAIN, DEFAULT_X_DOMAIN)
+      const domainMin = hasIntegral ? Math.min(-DEFAULT_X_DOMAIN, integralLower, integralUpper) : -DEFAULT_X_DOMAIN
+      const domainMax = hasIntegral ? Math.max(DEFAULT_X_DOMAIN, integralLower, integralUpper) : DEFAULT_X_DOMAIN
+      const initial = sampleFunction(compiled, values, domainMin, domainMax)
       const [yMin, yMax] = autoscaleY(initial)
-      return { xMin: -DEFAULT_X_DOMAIN, xMax: DEFAULT_X_DOMAIN, yMin, yMax }
+      return { xMin: domainMin, xMax: domainMax, yMin, yMax }
     }
     return { xMin: -DEFAULT_X_DOMAIN, xMax: DEFAULT_X_DOMAIN, yMin: -DEFAULT_X_DOMAIN, yMax: DEFAULT_X_DOMAIN }
   })
@@ -520,6 +554,16 @@ function FunctionGraphWidget({ expression, parametricX, parametricY, values, lat
     return compiled ? sampleFunction(compiled, values, viewport.xMin, viewport.xMax) : []
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isParametric, compiled, compiledX, compiledY, values, viewport.xMin, viewport.xMax])
+
+  const shadePoints = useMemo(() => {
+    if (!hasIntegral || !compiled) return null
+    return sampleFunction(compiled, values, Math.min(integralLower, integralUpper), Math.max(integralLower, integralUpper), 150)
+  }, [hasIntegral, compiled, values, integralLower, integralUpper])
+
+  const integralValue = useMemo(() => {
+    if (!hasIntegral || !compiled) return null
+    return definiteIntegral(compiled, values, integralLower, integralUpper)
+  }, [hasIntegral, compiled, values, integralLower, integralUpper])
 
   const cursor = useMemo(() => {
     if (!ready) return null
@@ -542,21 +586,23 @@ function FunctionGraphWidget({ expression, parametricX, parametricY, values, lat
     const canvas = canvasRef.current
     if (!canvas || !ready) return undefined
 
-    // Sized to the parent card's actual available width (not a hardcoded
-    // constant) so the graph never overflows its container regardless of
-    // widget card width -- re-measured on resize since the widget is
-    // positioned with percentage offsets (SPEC.md 3.3) that can change
-    // with the viewport.
+    // Sized to the parent's actual CSS-rendered dimensions (not a
+    // hardcoded constant for either axis) so the canvas's internal pixel
+    // buffer always matches how large it's actually drawn on screen --
+    // mismatched internal vs. CSS size stretches/blurs the bitmap exactly
+    // like scaling up a low-res image. Re-measured on resize since the
+    // widget is positioned with percentage offsets (SPEC.md 3.3) that can
+    // change with the viewport.
     const draw = () => {
       canvas.width = canvas.clientWidth
-      canvas.height = 160
-      drawFunctionGraph(canvas, { points, cursor, viewport, closed: isParametric })
+      canvas.height = canvas.clientHeight
+      drawFunctionGraph(canvas, { points, cursor, viewport, closed: isParametric, shadePoints })
     }
     draw()
 
     window.addEventListener('resize', draw)
     return () => window.removeEventListener('resize', draw)
-  }, [ready, points, cursor, viewport, isParametric])
+  }, [ready, points, cursor, viewport, isParametric, shadePoints])
 
   if (!ready) {
     return (
@@ -599,11 +645,30 @@ function FunctionGraphWidget({ expression, parametricX, parametricY, values, lat
           onChange={(event) => setT(Number(event.target.value))}
         />
       </div>
+      {hasIntegral && (
+        <div className={SLIDER_ROW_HEADER_CLASS}>
+          <span className={SLIDER_LABEL_CLASS}>
+            ∫ from {integralLower} to {integralUpper}
+          </span>
+          <span data-testid="function-graph-integral-value" className={SLIDER_VALUE_CLASS}>
+            = {Number.isFinite(integralValue) ? integralValue.toFixed(2) : 'undefined'}
+          </span>
+        </div>
+      )}
     </div>
   )
 }
 
-function SimulationCanvas({ simType, values, expression, parametricX, parametricY, latestTrackRef }) {
+function SimulationCanvas({
+  simType,
+  values,
+  expression,
+  parametricX,
+  parametricY,
+  integralLower,
+  integralUpper,
+  latestTrackRef,
+}) {
   switch (simType) {
     case 'spring_mass':
       return <SpringMassWidget values={values} />
@@ -617,6 +682,8 @@ function SimulationCanvas({ simType, values, expression, parametricX, parametric
           expression={expression}
           parametricX={parametricX}
           parametricY={parametricY}
+          integralLower={integralLower}
+          integralUpper={integralUpper}
           values={values}
           latestTrackRef={latestTrackRef}
         />
@@ -661,6 +728,8 @@ export function SimulationWidget({ widget, latestTrackRef }) {
         expression={widget.expression}
         parametricX={widget.parametric_x}
         parametricY={widget.parametric_y}
+        integralLower={widget.integral_lower}
+        integralUpper={widget.integral_upper}
         latestTrackRef={latestTrackRef}
       />
       <div className="px-2">

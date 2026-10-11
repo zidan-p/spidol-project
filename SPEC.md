@@ -162,7 +162,7 @@ class BaseTouchProvider(ABC):
   - *Blackout Mode (Hotkey `F`):* Full-screen, auto-hides UI controls, canvas background pure `#000000` so black pixels emit zero lumens and the physical whiteboard shows through as the background.
   - *Kiosk Mode:* separately, the browser runs truly fullscreen with nothing else clickable and the real OS cursor hidden (`cursor: none`). Defense-in-depth now that the Touch Signal no longer touches the OS cursor at all **(ADR-0001)**.
 - **Dual-Input Synchronization Engine:** a single unified vector stroke buffer (`strokes[]`) ingests native pointer events (mouse) and normalized coordinates + Touch Signal state streamed from the server over WebSocket (`useSpidolSocket.js`). v1 is hard-coded for exactly one Stylus end-to-end **(ADR-0004)**; `device_id` rides along in the schema unused.
-- **Simulation Widgets:** each Simulation Type has its own hand-written RK4 integrator (no general physics library), with real-time parameter sliders controllable via the Stylus or the laptop mouse.
+- **Simulation Widgets:** each Simulation Type has its own hand-written RK4 integrator (no general physics library). Per-formula parameter sliders (m/b, radius, k/m, ...) are not rendered — the curve/simulation always runs with the AI's own default values; only the x/t exploration slider and (for `function_graph`) the Graph Viewport's pan/zoom are interactive. A `function_graph` whose formula was a Definite Integral additionally shades the area under the curve between its bounds and displays the computed numeric value.
 
 ---
 

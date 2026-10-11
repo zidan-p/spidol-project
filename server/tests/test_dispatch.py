@@ -34,6 +34,8 @@ def test_recognized_simulation_type_builds_ai_widget_spawn():
         "expression": None,
         "parametric_x": None,
         "parametric_y": None,
+        "integral_lower": None,
+        "integral_upper": None,
         "parameters": [
             {"key": "k", "label": "Spring Stiffness (N/m)", "min": 10, "max": 100, "val": 45},
             {"key": "m", "label": "Bob Mass (kg)", "min": 0.5, "max": 5.0, "val": 1.2},
@@ -78,6 +80,25 @@ def test_function_graph_spawn_includes_parametric_fields():
     assert payload["expression"] is None
     assert payload["parametric_x"] == "r*cos(t)"
     assert payload["parametric_y"] == "r*sin(t)"
+
+
+def test_function_graph_spawn_includes_integral_bounds():
+    analysis = FormulaAnalysis(
+        formula_latex=r"\int_{0}^{1} (2x+1) \, dx",
+        concept_title="Definite Integral of a Linear Function",
+        simulation_type="function_graph",
+        expression="2*x + 1",
+        integral_lower=0,
+        integral_upper=1,
+        parameters=[],
+    )
+
+    raw = build_widget_message(analysis, widget_id="widget_05", anchor_x=0.4, anchor_y=0.2)
+    payload = json.loads(raw)
+
+    assert payload["type"] == "AI_WIDGET_SPAWN"
+    assert payload["integral_lower"] == 0
+    assert payload["integral_upper"] == 1
 
 
 def test_unrecognized_simulation_type_builds_ai_widget_unsupported():

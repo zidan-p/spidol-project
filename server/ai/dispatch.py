@@ -22,6 +22,8 @@ def build_widget_message(
                 "expression": analysis.expression,
                 "parametric_x": analysis.parametric_x,
                 "parametric_y": analysis.parametric_y,
+                "integral_lower": analysis.integral_lower,
+                "integral_upper": analysis.integral_upper,
                 "parameters": [p.model_dump() for p in analysis.parameters],
             }
         )

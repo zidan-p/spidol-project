@@ -82,6 +82,14 @@ PROMPT_TEXT = (
     "and reasonable adjustable parameters with min/max/default values "
     "for every constant that appears (x and t are never parameters -- "
     "they're sliders the UI already provides).\n\n"
+    "DEFINITE INTEGRAL -- if, and only if, the handwritten formula is an "
+    'explicit definite integral with numeric bounds (e.g. "\\int_{0}^{1} '
+    '(2x+1)\\,dx"): use the EXPLICIT representation above for the '
+    'integrand (e.g. "expression": "2*x + 1"), and additionally return '
+    '"integral_lower" and "integral_upper" as the two numeric bounds '
+    "(e.g. 0 and 1). Leave both null for every other formula, including "
+    "an explicit function with no integral notation at all -- never "
+    "invent bounds that weren't actually drawn.\n\n"
     "Respond with ONLY a single JSON object (no prose, no markdown code "
     "fence), matching exactly this shape:\n"
     '{"formula_latex": "<latex string>", "concept_title": "<short title>", '
@@ -89,6 +97,8 @@ PROMPT_TEXT = (
     '"expression": "<mathjs expression, or null>", '
     '"parametric_x": "<mathjs expression, or null>", '
     '"parametric_y": "<mathjs expression, or null>", '
+    '"integral_lower": <number, or null>, '
+    '"integral_upper": <number, or null>, '
     '"parameters": [{"key": "<param key>", "label": "<display label>", '
     '"min": <number>, "max": <number>, "val": <number>}, ...]}'
 )
@@ -163,6 +173,18 @@ class FormulaAnalysis(BaseModel):
     # parametric_x="r*cos(t)", parametric_y="r*sin(t)".
     parametric_x: str | None = None
     parametric_y: str | None = None
+    # Set (both, or neither -- never just one) when the handwritten formula
+    # is an explicit DEFINITE integral with numeric bounds (e.g.
+    # "\int_{0}^{1} (2x+1) dx"): `expression` is still the integrand
+    # ("2*x + 1"), solved/simplified the same way as any other explicit
+    # function_graph; these two carry the integral's lower/upper bounds so
+    # the frontend can shade the area under the curve and compute its
+    # numeric value, instead of just plotting the integrand as a plain
+    # line with no indication an integral was asked for at all. None for
+    # every other formula, including an explicit function with no integral
+    # notation.
+    integral_lower: float | None = None
+    integral_upper: float | None = None
     parameters: list[Parameter]
 
 
