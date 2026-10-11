@@ -45,6 +45,7 @@ import argparse
 import asyncio
 import functools
 import http.server
+import logging
 import os
 import threading
 from pathlib import Path
@@ -333,6 +334,12 @@ async def run(args: argparse.Namespace) -> None:
 
 
 def main() -> None:
+    # Without this, every module's module-level `logger.info(...)`/
+    # `logger.warning(...)` call (e.g. WifiTouchProvider's "Stylus
+    # connected"/"disconnected" logs) is silently dropped -- Python's root
+    # logger has no handler by default, so only WARNING+ reaches stderr via
+    # the fallback handler, and even that has no timestamp/module context.
+    logging.basicConfig(level=logging.INFO, format="%(asctime)s %(name)s %(levelname)s: %(message)s")
     load_dotenv()
     args = parse_args()
     try:
