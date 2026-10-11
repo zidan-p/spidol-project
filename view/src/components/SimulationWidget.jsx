@@ -37,7 +37,7 @@ const SUPPORTED_SIM_TYPES = new Set(['spring_mass', 'pendulum', 'projectile', 'f
 
 const CARD_CLASS =
   'pointer-events-auto absolute  bottom-[2%] right-[1%] w-100 rounded-2xl border border-chrome-border bg-chrome-bg text-[13px] text-chrome-text shadow-[0_8px_24px_rgba(0,0,0,0.45)] backdrop-blur-lg accent-accent'
-const FORMULA_CLASS = 'my-1.5 font-mono text-chrome-muted'
+const FORMULA_CLASS = 'my-1.5 text-center font-mono text-chrome-muted'
 const SLIDER_ROW_CLASS = 'my-2.5 px-2'
 const SLIDER_ROW_HEADER_CLASS = 'mb-1 flex items-baseline justify-between gap-2'
 const SLIDER_LABEL_CLASS = 'text-[11px] text-chrome-muted'
@@ -615,7 +615,7 @@ function FunctionGraphWidget({
         />
       </div>
       {hasIntegral && (
-        <div className={SLIDER_ROW_HEADER_CLASS}>
+        <div className={`${SLIDER_ROW_HEADER_CLASS} px-2`}>
           <span className={SLIDER_LABEL_CLASS}>
             ∫ from {integralLower} to {integralUpper}
           </span>
