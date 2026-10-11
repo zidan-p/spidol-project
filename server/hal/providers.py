@@ -2,8 +2,10 @@
 
 v1 ships `KeyboardMockProvider` as the mouse-click-based touch stub (this
 ticket binds it to the left mouse button in main.py). `BleTouchProvider`
-(ticket 05, real GATT notify consumer) slots in here as a sibling class
-implementing the same `BaseTouchProvider` ABC.
+(ticket 05, real GATT notify consumer) and `WifiTouchProvider` (the
+WiFi/TCP firmware variant, spidol/spidol_firmware.ino's WiFiClient-based
+main.cpp) slot in here as sibling classes implementing the same
+`BaseTouchProvider` ABC.
 """
 import asyncio
 import logging
@@ -146,3 +148,61 @@ class BleTouchProvider(BaseTouchProvider):
         # Synchronous, cheap, callable from the 60fps telemetry loop without
         # awaiting anything -- the whole point of the bridge above.
         return self._touching
+
+
+class WifiTouchProvider(BaseTouchProvider):
+    """Touch-signal source for the WiFi/TCP firmware variant
+    (spidol/spidol_firmware.ino's `WiFiClient`-based main.cpp): instead of
+    this process connecting out over BLE, the ESP32 connects out to *this*
+    process as a plain TCP client and sends newline-terminated ASCII "1"/"0"
+    lines on each Tip Contact Switch transition (TTP223 touch module -> HIGH
+    = pressed). No AI Trigger notification exists in that firmware today --
+    unlike `BleTouchProvider`, there's no `on_ai_trigger` here.
+
+    Mirrors `BleTouchProvider`'s shape otherwise: a background
+    `run_forever()` coroutine (intended to run as its own
+    `asyncio.create_task` at server startup) bridging the async socket read
+    loop into the synchronous `is_touching()` seam the 60fps telemetry loop
+    calls every tick.
+    """
+
+    def __init__(self, host: str = "0.0.0.0", port: int = 8080):
+        self._host = host
+        self._port = port
+        self._touching = False
+        self._server = None
+
+    def is_touching(self) -> bool:
+        return self._touching
+
+    async def run_forever(self) -> None:
+        """Starts listening for the Stylus's incoming TCP connection and
+        serves forever, accepting reconnects (the firmware retries its own
+        connection on drop, same as BLE disconnects are routine).
+        """
+        self._server = await asyncio.start_server(self._handle_client, self._host, self._port)
+        async with self._server:
+            await self._server.serve_forever()
+
+    async def _handle_client(self, reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
+        peer = writer.get_extra_info("peername")
+        logger.info("WifiTouchProvider: Stylus connected from %s", peer)
+        try:
+            while True:
+                line = await reader.readline()
+                if not line:
+                    break
+                value = line.strip()
+                if value == b"1":
+                    self._touching = True
+                elif value == b"0":
+                    self._touching = False
+        except Exception:
+            logger.exception("WifiTouchProvider: connection error")
+        finally:
+            logger.info("WifiTouchProvider: Stylus disconnected")
+            # A lost connection means the real switch state is no longer
+            # known -- safer to assume released than to keep drawing with a
+            # stale "still touching" forever.
+            self._touching = False
+            writer.close()

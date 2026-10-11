@@ -20,6 +20,8 @@ to its output before broadcasting -- see `make_camera_resources` below and
 `server_app.py`'s module docstring for the telemetry-loop wiring itself.
 `BleTouchProvider` (ticket 05, the real Stylus over BLE) is wired here behind
 `--ble-address` without changing anything below the HAL seam.
+`WifiTouchProvider` is a sibling for a WiFi/TCP firmware variant, wired
+behind `--wifi-touch-port` the same way.
 
 BLE mode (`--ble-address <mac-or-uuid>`): `make_touch_provider` returns a
 `BleTouchProvider` instead of `KeyboardMockProvider`, the pynput mouse
@@ -30,6 +32,14 @@ server exists -- see `server_app.py`'s module docstring for why that's a
 direct call, not a self-directed WebSocket message. This firmware pairing
 (GATT service/characteristic UUIDs, GPIO pins) is documented in
 `spidol/spidol_firmware.ino`.
+
+WiFi mode (`--wifi-touch-port <port>`): `make_touch_provider` returns a
+`WifiTouchProvider` instead, which listens for the ESP32's own outgoing TCP
+connection (`spidol/src/main.cpp`'s `WiFiClient`-based firmware) rather than
+this process connecting out, and has no AI Trigger notification -- that
+firmware variant only carries the Touch Signal (newline-terminated "1"/"0"
+lines on each Tip Contact Switch transition). `run()` only starts its
+`run_forever()` background task; there's no `set_on_ai_trigger` call to make.
 """
 import argparse
 import asyncio
@@ -43,7 +53,7 @@ from dotenv import load_dotenv
 
 from ai.vision_pipeline import DEFAULT_BASE_URL, DEFAULT_MODEL, make_live_client
 from hal.image_source import BrowserCanvasImageSource, CameraImageSource
-from hal.providers import BleTouchProvider, KeyboardMockProvider
+from hal.providers import BleTouchProvider, KeyboardMockProvider, WifiTouchProvider
 from hal.trackers import OpticalColorTracker, SystemMouseFallbackTracker
 from server_app import create_server
 from vision.debug_preview import DebugPreviewTracker
@@ -110,6 +120,18 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         ),
     )
     parser.add_argument(
+        "--wifi-touch-port",
+        type=int,
+        default=None,
+        help=(
+            "Listen on this TCP port for the WiFi/TCP Stylus firmware variant "
+            "(spidol/spidol_firmware.ino's WiFiClient-based main.cpp), which "
+            "connects out to this process and sends newline-terminated '1'/'0' "
+            "lines on each Tip Contact Switch transition. Mutually exclusive "
+            "with --ble-address (that one wins if both are given)."
+        ),
+    )
+    parser.add_argument(
         "--ai-base-url",
         default=None,
         help=(
@@ -143,9 +165,11 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
 
 def make_touch_provider(args: argparse.Namespace):
     """Picks the touch-signal source: the real Stylus over BLE if
-    `--ble-address` was given, else the v1 mouse-click stand-in.
+    `--ble-address` was given, the WiFi/TCP firmware variant if
+    `--wifi-touch-port` was given, else the v1 mouse-click stand-in.
     `on_ai_trigger` is deliberately left unset here -- see `run()`, which
-    wires it to `server.fire_ai_trigger` once the server exists.
+    wires it to `server.fire_ai_trigger` once the server exists (BLE only;
+    the WiFi/TCP firmware variant has no AI Trigger signal today).
     """
     if args.ble_address:
         return BleTouchProvider(
@@ -153,6 +177,8 @@ def make_touch_provider(args: argparse.Namespace):
             touch_char_uuid=BLE_TOUCH_CHAR_UUID,
             ai_trigger_char_uuid=BLE_AI_TRIGGER_CHAR_UUID,
         )
+    if args.wifi_touch_port:
+        return WifiTouchProvider(port=args.wifi_touch_port)
     return KeyboardMockProvider()
 
 
@@ -299,6 +325,9 @@ async def run(args: argparse.Namespace) -> None:
             touch_provider.set_on_ai_trigger(server.fire_ai_trigger)
             asyncio.create_task(touch_provider.run_forever())
             print(f"Connecting to SPIDOL Stylus at {args.ble_address}...")
+        elif isinstance(touch_provider, WifiTouchProvider):
+            asyncio.create_task(touch_provider.run_forever())
+            print(f"Listening for SPIDOL Stylus (WiFi) on TCP port {args.wifi_touch_port}...")
 
         await server.wait_closed()
 

@@ -6,7 +6,7 @@ from pynput.mouse import Button
 
 from main import make_camera_resources, make_click_handler, make_touch_provider, make_tracker, parse_args
 from hal.image_source import BrowserCanvasImageSource, CameraImageSource
-from hal.providers import BleTouchProvider, KeyboardMockProvider
+from hal.providers import BleTouchProvider, KeyboardMockProvider, WifiTouchProvider
 from hal.trackers import OpticalColorTracker, SystemMouseFallbackTracker
 from vision.debug_preview import DebugPreviewTracker
 from vision.homography import HomographyCalibrator
@@ -69,6 +69,28 @@ def test_make_touch_provider_returns_keyboard_mock_when_no_ble_address():
 
 def test_make_touch_provider_returns_ble_touch_provider_when_ble_address_given():
     args = parse_args(["--ble-address", "AA:BB:CC:DD:EE:FF"])
+    provider = make_touch_provider(args)
+    assert isinstance(provider, BleTouchProvider)
+
+
+def test_parse_args_defaults_wifi_touch_port_to_none():
+    args = parse_args([])
+    assert args.wifi_touch_port is None
+
+
+def test_parse_args_recognizes_wifi_touch_port_flag():
+    args = parse_args(["--wifi-touch-port", "8080"])
+    assert args.wifi_touch_port == 8080
+
+
+def test_make_touch_provider_returns_wifi_touch_provider_when_wifi_touch_port_given():
+    args = parse_args(["--wifi-touch-port", "8080"])
+    provider = make_touch_provider(args)
+    assert isinstance(provider, WifiTouchProvider)
+
+
+def test_make_touch_provider_prefers_ble_address_over_wifi_touch_port_if_both_given():
+    args = parse_args(["--ble-address", "AA:BB:CC:DD:EE:FF", "--wifi-touch-port", "8080"])
     provider = make_touch_provider(args)
     assert isinstance(provider, BleTouchProvider)
 
