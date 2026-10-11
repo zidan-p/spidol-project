@@ -4,7 +4,7 @@
 // parameter sliders (m/b, radius, k/m, ...) are deliberately not rendered --
 // the curve/simulation always uses the AI's own default values.
 import { fireEvent, render, screen } from '@testing-library/react'
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { SimulationWidget } from '../SimulationWidget'
 
 const springMassWidget = {
@@ -200,5 +200,23 @@ describe('SimulationWidget', () => {
     render(<SimulationWidget widget={malformed} />)
 
     expect(screen.getByText(/not yet supported/i)).toBeInTheDocument()
+  })
+
+  it('calls onClose when the close button is clicked, for both a spawned and an unsupported widget', () => {
+    const onCloseSpawned = vi.fn()
+    const { unmount } = render(<SimulationWidget widget={springMassWidget} onClose={onCloseSpawned} />)
+    fireEvent.click(screen.getByLabelText('Close'))
+    expect(onCloseSpawned).toHaveBeenCalledTimes(1)
+    unmount()
+
+    const onCloseUnsupported = vi.fn()
+    render(<SimulationWidget widget={unsupportedWidget} onClose={onCloseUnsupported} />)
+    fireEvent.click(screen.getByLabelText('Close'))
+    expect(onCloseUnsupported).toHaveBeenCalledTimes(1)
+  })
+
+  it('renders no close button when onClose is not provided', () => {
+    render(<SimulationWidget widget={springMassWidget} />)
+    expect(screen.queryByLabelText('Close')).not.toBeInTheDocument()
   })
 })

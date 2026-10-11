@@ -52,5 +52,13 @@ export function useSpidolSocket(url) {
     socketRef.current?.send(JSON.stringify(message))
   }
 
-  return { latestTrackRef, connectionState, widgets, sendMessage }
+  // Dismisses a widget locally (closing its card) -- purely a frontend
+  // concern, no server message: the server's AI Trigger Region tracking is
+  // keyed off strokes, not spawned widgets, so there's nothing server-side
+  // to reconcile when one is closed.
+  const removeWidget = (widgetId) => {
+    setWidgets((prev) => prev.filter((widget) => widget.widget_id !== widgetId))
+  }
+
+  return { latestTrackRef, connectionState, widgets, sendMessage, removeWidget }
 }

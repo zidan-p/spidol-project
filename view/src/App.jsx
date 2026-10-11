@@ -46,7 +46,7 @@ const AI_TRIGGER_KEY = 't'
 const CALIBRATE_KEY = 'c'
 
 function App() {
-  const { latestTrackRef, connectionState, widgets, sendMessage } = useSpidolSocket(WEBSOCKET_URL)
+  const { latestTrackRef, connectionState, widgets, sendMessage, removeWidget } = useSpidolSocket(WEBSOCKET_URL)
   const canvasRef = useRef(null)
 
   const [tool, setTool] = useState('pen')
@@ -233,7 +233,12 @@ function App() {
       />
       <div className="pointer-events-none absolute inset-0 z-5">
         {widgets.map((widget) => (
-          <SimulationWidget key={widget.widget_id} widget={widget} latestTrackRef={latestTrackRef} />
+          <SimulationWidget
+            key={widget.widget_id}
+            widget={widget}
+            latestTrackRef={latestTrackRef}
+            onClose={() => removeWidget(widget.widget_id)}
+          />
         ))}
       </div>
     </div>

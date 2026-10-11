@@ -19,6 +19,7 @@
 // sim_type isn't one of these) rather than crashing or doing nothing.
 import katex from 'katex'
 import 'katex/dist/katex.min.css'
+import { X } from 'lucide-react'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { niceTicks } from '../lib/axisTicks'
 import {
@@ -36,7 +37,7 @@ import { traceSmoothPath } from '../lib/smoothPath'
 const SUPPORTED_SIM_TYPES = new Set(['spring_mass', 'pendulum', 'projectile', 'function_graph'])
 
 const CARD_CLASS =
-  'pointer-events-auto absolute  bottom-[2%] right-[1%] w-100 rounded-2xl border border-chrome-border bg-chrome-bg text-[13px] text-chrome-text shadow-[0_8px_24px_rgba(0,0,0,0.45)] backdrop-blur-lg accent-accent'
+  'pointer-events-auto overflow-hidden absolute  bottom-[2%] right-[1%] w-100 rounded-2xl border border-chrome-border bg-chrome-bg text-[13px] text-chrome-text shadow-[0_8px_24px_rgba(0,0,0,0.45)] backdrop-blur-lg accent-accent pb-2'
 const FORMULA_CLASS = 'my-1.5 text-center font-mono text-chrome-muted'
 const SLIDER_ROW_CLASS = 'my-2.5 px-2'
 const SLIDER_ROW_HEADER_CLASS = 'mb-1 flex items-baseline justify-between gap-2'
@@ -676,13 +677,33 @@ function RenderedFormula({ latex, className }) {
   return <div className={className} dangerouslySetInnerHTML={{ __html: html }} />
 }
 
-function UnsupportedWidget({ widget }) {
+// Dismisses the widget card -- purely a frontend concern (SimulationWidget
+// has no itself owned "close" state; the parent list of widgets lives in
+// useSpidolSocket, see App.jsx's onClose). Rendered on both the normal and
+// AI_WIDGET_UNSUPPORTED states so a stuck/unwanted card is never the only
+// thing standing between the user and a clear whiteboard.
+function CloseButton({ onClose }) {
+  if (!onClose) return null
+  return (
+    <button
+      type="button"
+      onClick={onClose}
+      aria-label="Close"
+      className="absolute right-2 top-2 z-10 rounded-full p-1 text-chrome-muted hover:bg-chrome-border hover:text-chrome-text"
+    >
+      <X size={14} />
+    </button>
+  )
+}
+
+function UnsupportedWidget({ widget, onClose }) {
   const title = widget.title ?? 'Unknown concept'
   const formula = widget.formula_latex
   const attemptedSimType = widget.attempted_sim_type ?? widget.sim_type
 
   return (
     <div className={`${CARD_CLASS} border-amber-800 text-amber-400`} data-widget-id={widget.widget_id}>
+      <CloseButton onClose={onClose} />
       <h3 className="font-semibold">{title}</h3>
       <RenderedFormula latex={formula} className={FORMULA_CLASS} />
       <p className="text-[13px]">Concept detected, but not yet supported ({attemptedSimType}).</p>
@@ -690,7 +711,7 @@ function UnsupportedWidget({ widget }) {
   )
 }
 
-export function SimulationWidget({ widget, latestTrackRef }) {
+export function SimulationWidget({ widget, latestTrackRef, onClose }) {
   // No slider controls for the formula's own parameters (m/b, radius, k/m,
   // ...) -- the curve/simulation always runs with the AI's own default
   // values, so this never needs to change after mount.
@@ -700,11 +721,16 @@ export function SimulationWidget({ widget, latestTrackRef }) {
     widget.type === 'AI_WIDGET_SPAWN' && SUPPORTED_SIM_TYPES.has(widget.sim_type)
 
   if (!isSpawnable) {
-    return <UnsupportedWidget widget={widget} />
+    return <UnsupportedWidget widget={widget} onClose={onClose} />
   }
 
   return (
     <div className={CARD_CLASS} data-widget-id={widget.widget_id}>
+      <CloseButton onClose={onClose} />
+      <div className="px-2 absolute bg-chrome-bg rounded right-[50%] translate-x-1/2">
+        <h3 className="font-semibold text-center">{widget.title}</h3>
+        <RenderedFormula latex={widget.formula_latex} className={FORMULA_CLASS} />
+      </div>
       <SimulationCanvas
         simType={widget.sim_type}
         values={values}
@@ -715,10 +741,6 @@ export function SimulationWidget({ widget, latestTrackRef }) {
         integralUpper={widget.integral_upper}
         latestTrackRef={latestTrackRef}
       />
-      <div className="px-2">
-        <h3 className="font-semibold">{widget.title}</h3>
-        <RenderedFormula latex={widget.formula_latex} className={FORMULA_CLASS} />
-      </div>
     </div>
   )
 }
