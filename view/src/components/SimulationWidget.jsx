@@ -252,6 +252,13 @@ const DEFAULT_X_DOMAIN = 10
 const PARAMETRIC_T_RANGE = [0, 2 * Math.PI]
 const ZOOM_IN_FACTOR = 0.85
 const ZOOM_OUT_FACTOR = 1 / ZOOM_IN_FACTOR
+// Double-tap-to-zoom (the marker-compatible zoom gesture, see
+// useMarkerGraphInteraction): a single tracked device has no "scroll
+// wheel" signal, so zoom instead triggers on two touch-downs close
+// together in both time and position.
+const DOUBLE_TAP_WINDOW_MS = 400
+const DOUBLE_TAP_MAX_DISTANCE_PX = 30
+const DOUBLE_TAP_ZOOM_FACTOR = 0.5
 
 // Evaluates `compiled` with the given scope (parameter values merged with
 // whichever independent variable applies -- `x` for an explicit y = f(x),
@@ -286,6 +293,40 @@ function makeProjection(viewport, plotLeft, plotRight, plotTop, plotBottom) {
     toData(px, py) {
       return [xMin + ((px - plotLeft) / plotWidth) * xSpan, yMin + ((plotBottom - py) / plotHeight) * ySpan]
     },
+  }
+}
+
+// Traces `pixelPoints` ([px, py] pairs, already projected) as a smooth
+// curve instead of straight segments between raw samples -- the classic
+// "quadratic curve through midpoints" technique: each sampled point
+// becomes a control point pulling the curve toward it, while the curve
+// itself passes through the midpoint of each consecutive pair, so corners
+// get rounded rather than kinked. Purely cosmetic -- the underlying sample
+// points (and therefore the math) are unchanged; only the strokeback
+// path between them is smoothed. `closed` additionally smooths the
+// wrap-around segment (parametric curves like a circle) instead of
+// leaving a sharp seam where the path loops back to its start.
+function traceSmoothPath(ctx, pixelPoints, closed) {
+  const n = pixelPoints.length
+  if (n === 0) return
+  if (n === 1) {
+    ctx.moveTo(...pixelPoints[0])
+    return
+  }
+  const mid = (a, b) => [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2]
+
+  if (closed) {
+    ctx.moveTo(...mid(pixelPoints[n - 1], pixelPoints[0]))
+    for (let i = 0; i < n; i += 1) {
+      const next = pixelPoints[(i + 1) % n]
+      ctx.quadraticCurveTo(...pixelPoints[i], ...mid(pixelPoints[i], next))
+    }
+  } else {
+    ctx.moveTo(...pixelPoints[0])
+    for (let i = 1; i < n - 1; i += 1) {
+      ctx.quadraticCurveTo(...pixelPoints[i], ...mid(pixelPoints[i], pixelPoints[i + 1]))
+    }
+    ctx.lineTo(...pixelPoints[n - 1])
   }
 }
 
@@ -339,13 +380,10 @@ function drawFunctionGraph(canvas, { points, cursor, viewport, closed }) {
 
   ctx.strokeStyle = '#c792ea'
   ctx.lineWidth = 2
+  ctx.lineJoin = 'round'
+  ctx.lineCap = 'round'
   ctx.beginPath()
-  points.forEach((point, index) => {
-    const [px, py] = toPx(point.x, point.y)
-    if (index === 0) ctx.moveTo(px, py)
-    else ctx.lineTo(px, py)
-  })
-  if (closed && points.length > 1) ctx.closePath()
+  traceSmoothPath(ctx, points.map((p) => toPx(p.x, p.y)), closed)
   ctx.stroke()
 
   if (cursor && Number.isFinite(cursor.x) && Number.isFinite(cursor.y)) {
@@ -357,69 +395,121 @@ function drawFunctionGraph(canvas, { points, cursor, viewport, closed }) {
   }
 }
 
-// Wires wheel-to-zoom (centered on the cursor, not just the viewport
-// center) and drag-to-pan directly onto the canvas, independent of the
-// main whiteboard's mouse-fallback touch signal -- these are genuine local
-// DOM events on this specific element, unrelated to useDrawSuppression's
-// concern (which only gates the *whiteboard* canvas's ink).
-function useGraphInteraction(canvasRef, viewport, setViewport) {
+// Wheel-to-zoom only (centered on the cursor, not just the viewport
+// center) -- a genuine local DOM event on this specific element, unrelated
+// to useDrawSuppression's concern (which only gates the *whiteboard*
+// canvas's ink). Drag-to-pan is deliberately NOT a native pointer listener
+// here -- see useMarkerGraphInteraction below for why panning instead goes
+// through the same TRACK_UPDATE stream the whiteboard itself uses, so the
+// real Stylus (which has no OS-level pointer events at all, only a
+// position broadcast) can pan the same way a mouse does, instead of only
+// ever working for whichever input happens to fire real DOM events.
+function useWheelZoom(canvasRef, viewport, setViewport) {
   useEffect(() => {
     const canvas = canvasRef.current
     if (!canvas) return undefined
-
-    const plotLeft = GRAPH_MARGIN
-    const plotTop = 4
 
     const onWheel = (event) => {
       event.preventDefault()
       const rect = canvas.getBoundingClientRect()
       const px = event.clientX - rect.left
       const py = event.clientY - rect.top
-      const { toData } = makeProjection(viewport, plotLeft, canvas.width, plotTop, canvas.height - GRAPH_MARGIN)
+      const { toData } = makeProjection(viewport, GRAPH_MARGIN, canvas.width, 4, canvas.height - GRAPH_MARGIN)
       const [cx, cy] = toData(px, py)
       const factor = event.deltaY < 0 ? ZOOM_IN_FACTOR : ZOOM_OUT_FACTOR
       setViewport((current) => zoomViewport(current, { cx, cy, factor }))
     }
 
-    let dragState = null
-    const onPointerDown = (event) => {
-      canvas.setPointerCapture(event.pointerId)
-      dragState = { lastX: event.clientX, lastY: event.clientY }
-    }
-    const onPointerMove = (event) => {
-      if (!dragState) return
-      const plotWidth = canvas.width - plotLeft
-      const plotHeight = canvas.height - GRAPH_MARGIN - plotTop
-      const dxPx = event.clientX - dragState.lastX
-      const dyPx = event.clientY - dragState.lastY
-      dragState = { lastX: event.clientX, lastY: event.clientY }
-      setViewport((current) => {
-        const xSpan = current.xMax - current.xMin
-        const ySpan = current.yMax - current.yMin
-        const dx = -(dxPx / plotWidth) * xSpan
-        const dy = (dyPx / plotHeight) * ySpan
-        return panViewport(current, { dx, dy })
-      })
-    }
-    const onPointerUp = (event) => {
-      if (dragState) canvas.releasePointerCapture(event.pointerId)
-      dragState = null
-    }
-
     canvas.addEventListener('wheel', onWheel, { passive: false })
-    canvas.addEventListener('pointerdown', onPointerDown)
-    canvas.addEventListener('pointermove', onPointerMove)
-    canvas.addEventListener('pointerup', onPointerUp)
-    return () => {
-      canvas.removeEventListener('wheel', onWheel)
-      canvas.removeEventListener('pointerdown', onPointerDown)
-      canvas.removeEventListener('pointermove', onPointerMove)
-      canvas.removeEventListener('pointerup', onPointerUp)
-    }
+    return () => canvas.removeEventListener('wheel', onWheel)
   }, [canvasRef, viewport, setViewport])
 }
 
-function FunctionGraphWidget({ expression, parametricX, parametricY, values }) {
+// Pans the graph via the SAME TRACK_UPDATE stream that draws ink on the
+// whiteboard, not a native DOM pointer listener -- the real Stylus has no
+// OS-level pointer events at all (its position arrives only as this
+// broadcast), so a native-events-only pan would simply never work once
+// real hardware replaces mouse-fallback. Reading `latestTrackRef` on a
+// requestAnimationFrame loop (not React state) matches Canvas.jsx's own
+// pattern for the same 60fps stream. Double-tap (two touch-downs close in
+// time and position) zooms, since a single tracked point has no "scroll
+// wheel" equivalent -- see the DOUBLE_TAP_* constants.
+function useMarkerGraphInteraction(canvasRef, latestTrackRef, viewportRef, setViewport) {
+  useEffect(() => {
+    const canvas = canvasRef.current
+    if (!canvas || !latestTrackRef) return undefined
+
+    let rafId
+    let wasInsideAndTouching = false
+    let lastScreen = null
+    let lastTap = null // { time, x, y }
+
+    const loop = () => {
+      const message = latestTrackRef.current
+      const rect = canvas.getBoundingClientRect()
+      const insideAndTouching =
+        message?.is_detected &&
+        message.is_touching &&
+        (() => {
+          const screenX = message.x * window.innerWidth
+          const screenY = message.y * window.innerHeight
+          return (
+            screenX >= rect.left && screenX <= rect.right && screenY >= rect.top && screenY <= rect.bottom
+          )
+        })()
+
+      if (insideAndTouching) {
+        const screenX = message.x * window.innerWidth
+        const screenY = message.y * window.innerHeight
+
+        if (!wasInsideAndTouching) {
+          // Rising edge (a new press inside the graph) -- check for a
+          // double-tap before starting a fresh drag.
+          const now = performance.now()
+          if (
+            lastTap &&
+            now - lastTap.time < DOUBLE_TAP_WINDOW_MS &&
+            Math.hypot(screenX - lastTap.x, screenY - lastTap.y) < DOUBLE_TAP_MAX_DISTANCE_PX
+          ) {
+            const { toData } = makeProjection(
+              viewportRef.current,
+              GRAPH_MARGIN,
+              canvas.width,
+              4,
+              canvas.height - GRAPH_MARGIN
+            )
+            const [cx, cy] = toData(screenX - rect.left, screenY - rect.top)
+            setViewport((current) => zoomViewport(current, { cx, cy, factor: DOUBLE_TAP_ZOOM_FACTOR }))
+            lastTap = null
+          } else {
+            lastTap = { time: now, x: screenX, y: screenY }
+          }
+        } else if (lastScreen) {
+          const plotWidth = canvas.width - GRAPH_MARGIN
+          const plotHeight = canvas.height - GRAPH_MARGIN - 4
+          const dxPx = screenX - lastScreen.x
+          const dyPx = screenY - lastScreen.y
+          setViewport((current) => {
+            const xSpan = current.xMax - current.xMin
+            const ySpan = current.yMax - current.yMin
+            const dx = -(dxPx / plotWidth) * xSpan
+            const dy = (dyPx / plotHeight) * ySpan
+            return panViewport(current, { dx, dy })
+          })
+        }
+        lastScreen = { x: screenX, y: screenY }
+      } else {
+        lastScreen = null
+      }
+      wasInsideAndTouching = insideAndTouching
+      rafId = requestAnimationFrame(loop)
+    }
+    rafId = requestAnimationFrame(loop)
+    return () => cancelAnimationFrame(rafId)
+  }, [canvasRef, latestTrackRef, viewportRef, setViewport])
+}
+
+function FunctionGraphWidget({ expression, parametricX, parametricY, values, latestTrackRef }) {
   const isParametric = !expression && parametricX && parametricY
   const [t, setT] = useState(0)
   const canvasRef = useRef(null)
@@ -467,7 +557,11 @@ function FunctionGraphWidget({ expression, parametricX, parametricY, values }) {
     return { x: t, y: evaluateAt(compiled, { ...values, x: t }) }
   }, [ready, isParametric, compiled, compiledX, compiledY, values, t])
 
-  useGraphInteraction(canvasRef, viewport, setViewport)
+  const viewportRef = useRef(viewport)
+  viewportRef.current = viewport
+
+  useWheelZoom(canvasRef, viewport, setViewport)
+  useMarkerGraphInteraction(canvasRef, latestTrackRef, viewportRef, setViewport)
 
   useEffect(() => {
     const canvas = canvasRef.current
@@ -535,7 +629,7 @@ function FunctionGraphWidget({ expression, parametricX, parametricY, values }) {
   )
 }
 
-function SimulationCanvas({ simType, values, expression, parametricX, parametricY }) {
+function SimulationCanvas({ simType, values, expression, parametricX, parametricY, latestTrackRef }) {
   switch (simType) {
     case 'spring_mass':
       return <SpringMassWidget values={values} />
@@ -550,6 +644,7 @@ function SimulationCanvas({ simType, values, expression, parametricX, parametric
           parametricX={parametricX}
           parametricY={parametricY}
           values={values}
+          latestTrackRef={latestTrackRef}
         />
       )
     default:
@@ -571,7 +666,7 @@ function UnsupportedWidget({ widget }) {
   )
 }
 
-export function SimulationWidget({ widget }) {
+export function SimulationWidget({ widget, latestTrackRef }) {
   const [values, setValues] = useState(() => parametersToState(widget.parameters ?? []))
 
   const isSpawnable =
@@ -595,6 +690,7 @@ export function SimulationWidget({ widget }) {
         expression={widget.expression}
         parametricX={widget.parametric_x}
         parametricY={widget.parametric_y}
+        latestTrackRef={latestTrackRef}
       />
       <ParameterSliders parameters={widget.parameters} values={values} onChange={handleChange} />
     </div>

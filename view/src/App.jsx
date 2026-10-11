@@ -233,7 +233,7 @@ function App() {
       />
       <div className="pointer-events-none absolute inset-0 z-5">
         {widgets.map((widget) => (
-          <SimulationWidget key={widget.widget_id} widget={widget} />
+          <SimulationWidget key={widget.widget_id} widget={widget} latestTrackRef={latestTrackRef} />
         ))}
       </div>
     </div>

@@ -49,7 +49,7 @@ Either a fixed physics type (`spring_mass`, `pendulum`, `projectile`, each drive
 _Avoid_: Generative physics simulation, rigid-body physics engine
 
 **Graph Viewport**:
-The function_graph canvas's current `{xMin, xMax, yMin, yMax}` view window (`view/src/lib/graphViewport.js`), distinct from the AI-returned parameter values — pan (drag) and zoom (wheel) on the canvas manipulate only the Graph Viewport, never the curve's own parameters. Initialized once per widget from an auto-scaled default and persists across parameter-slider changes so a manual pan/zoom isn't reset by nudging an unrelated slider.
+The function_graph canvas's current `{xMin, xMax, yMin, yMax}` view window (`view/src/lib/graphViewport.js`), distinct from the AI-returned parameter values — pan and zoom on the canvas manipulate only the Graph Viewport, never the curve's own parameters. Initialized once per widget from an auto-scaled default and persists across parameter-slider changes so a manual pan/zoom isn't reset by nudging an unrelated slider. Zoom is mouse-wheel-only (no Touch Signal equivalent to "scroll"); pan goes through the same TRACK_UPDATE stream that draws whiteboard ink (not a native pointer listener), so it works identically for mouse-fallback and the real Stylus, with double-tap (two touch-downs close in time and position) as the Stylus-compatible zoom gesture.
 _Avoid_: Canvas bounds, plot domain
 
 **Tracking Loss**:
