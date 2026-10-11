@@ -14,9 +14,9 @@ from hal.trackers import OpticalColorTracker
 FRAME_WIDTH = 640
 FRAME_HEIGHT = 480
 
-# Pure green in BGR -> HSV hue ~60, squarely inside the tracker's default
-# green Pen Tip color range.
-PEN_TIP_BGR = (0, 255, 0)
+# Pure blue in BGR -> HSV hue ~120, squarely inside the tracker's default
+# blue Pen Tip color range.
+PEN_TIP_BGR = (255, 0, 0)
 
 
 def make_frame_with_blob(center_xy, radius=15, color=PEN_TIP_BGR):
@@ -71,7 +71,7 @@ def test_optical_color_tracker_reports_not_detected_for_none_frame():
 
 
 def test_optical_color_tracker_ignores_colors_outside_configured_range():
-    # A red blob should not trigger the default green-tuned tracker.
+    # A red blob should not trigger the default blue-tuned tracker.
     tracker = OpticalColorTracker()
     frame = make_frame_with_blob((FRAME_WIDTH // 2, FRAME_HEIGHT // 2), color=(0, 0, 255))
 

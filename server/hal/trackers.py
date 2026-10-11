@@ -70,7 +70,7 @@ class OpticalColorTracker(BasePositionTracker):
     shipping in v1 (`ArucoMarkerTracker` is out of scope). It thresholds the
     frame to a configurable HSV range, finds the largest matching contour,
     and reports its centroid as the Pen Tip position. The default range is
-    tuned for a bright green tip; pass `hsv_lower`/`hsv_upper` for a
+    tuned for a bright blue tip; pass `hsv_lower`/`hsv_upper` for a
     different Pen Tip color.
 
     Coordinates returned are normalized to the camera frame's own [0, 1]
@@ -78,8 +78,10 @@ class OpticalColorTracker(BasePositionTracker):
     homography module's job (`vision/homography.py`), not this class's.
     """
 
-    DEFAULT_HSV_LOWER = (35, 80, 80)
-    DEFAULT_HSV_UPPER = (85, 255, 255)
+    # OpenCV hue is 0-179 (not 0-359): blue sits around hue 120, so this
+    # range is centered there rather than at green's ~60.
+    DEFAULT_HSV_LOWER = (100, 80, 80)
+    DEFAULT_HSV_UPPER = (130, 255, 255)
 
     def __init__(
         self,
