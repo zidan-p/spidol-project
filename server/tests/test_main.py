@@ -10,6 +10,7 @@ from hal.providers import BleTouchProvider, KeyboardMockProvider, WifiTouchProvi
 from hal.trackers import OpticalColorTracker, SystemMouseFallbackTracker
 from vision.debug_preview import DebugPreviewTracker
 from vision.homography import HomographyCalibrator
+from vision.region_selector import Rect
 from vision.tracking_loss import TrackingLossBridge
 
 
@@ -131,6 +132,45 @@ def test_make_tracker_wraps_in_debug_preview_tracker_when_flag_set():
 def test_make_tracker_debug_camera_flag_has_no_effect_in_mouse_mode():
     args = parse_args(["--debug-camera"])
     tracker = make_tracker(args)
+    assert isinstance(tracker, SystemMouseFallbackTracker)
+
+
+def test_parse_args_defaults_adjust_tracking_region_to_false():
+    args = parse_args([])
+    assert args.adjust_tracking_region is False
+
+
+def test_parse_args_recognizes_adjust_tracking_region_flag():
+    args = parse_args(["--tracker", "optical-color", "--adjust-tracking-region"])
+    assert args.adjust_tracking_region is True
+
+
+def test_make_tracker_applies_search_region_to_optical_color_tracker():
+    region = Rect(x=10, y=20, width=100, height=150)
+    args = parse_args(["--tracker", "optical-color"])
+
+    tracker = make_tracker(args, search_region=region)
+
+    assert isinstance(tracker, OpticalColorTracker)
+    assert tracker.search_region == region
+
+
+def test_make_tracker_applies_search_region_even_when_wrapped_in_debug_preview():
+    region = Rect(x=10, y=20, width=100, height=150)
+    args = parse_args(["--tracker", "optical-color", "--debug-camera"])
+
+    tracker = make_tracker(args, search_region=region)
+
+    assert isinstance(tracker, DebugPreviewTracker)
+    assert tracker.inner.search_region == region
+
+
+def test_make_tracker_ignores_search_region_in_mouse_mode():
+    region = Rect(x=10, y=20, width=100, height=150)
+    args = parse_args([])
+
+    tracker = make_tracker(args, search_region=region)
+
     assert isinstance(tracker, SystemMouseFallbackTracker)
 
 

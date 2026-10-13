@@ -40,6 +40,16 @@ this process connecting out, and has no AI Trigger notification -- that
 firmware variant only carries the Touch Signal (newline-terminated "1"/"0"
 lines on each Tip Contact Switch transition). `run()` only starts its
 `run_forever()` background task; there's no `set_on_ai_trigger` call to make.
+
+Adjustable Tracking Region (`--adjust-tracking-region`, docs/specs/0002-
+adjustable-tracking-region.md): with `--tracker=optical-color`, `run()` pops
+up `vision/region_picker.py`'s live preview window *before* constructing the
+real `OpticalColorTracker` -- the operator drags out a rectangle (or just
+confirms to accept the full frame), the window closes, and the resolved
+region is baked into `OpticalColorTracker` via `make_tracker`'s
+`search_region` parameter, all within this same invocation. Nothing is
+persisted to disk; redo it next run if needed. Independent of
+`--debug-camera` (combinable, but neither implies the other).
 """
 import argparse
 import asyncio
@@ -59,7 +69,11 @@ from hal.trackers import OpticalColorTracker, SystemMouseFallbackTracker
 from server_app import create_server
 from vision.debug_preview import DebugPreviewTracker
 from vision.homography import HomographyCalibrator
+from vision.region_picker import pick_tracking_region
+from vision.region_selector import Rect
 from vision.tracking_loss import TrackingLossBridge
+
+logger = logging.getLogger(__name__)
 
 WEBSOCKET_HOST = "127.0.0.1"
 WEBSOCKET_PORT = 8765
@@ -107,6 +121,20 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
             "burned onto it -- the fastest way to confirm OpticalColorTracker is "
             "actually seeing the tracked color before trusting the drawing-based "
             "end-to-end test. No effect in mouse-fallback mode."
+        ),
+    )
+    parser.add_argument(
+        "--adjust-tracking-region",
+        action="store_true",
+        help=(
+            "When --tracker=optical-color, before starting the server, pop up a "
+            "live camera preview and let the operator drag out a rectangle "
+            "restricting where OpticalColorTracker searches for the Pen Tip -- "
+            "Enter/Space confirms (or accepts the full frame if nothing was "
+            "dragged), Esc discards the current drag to redraw. The window closes "
+            "once resolved and the same process continues into the normal server "
+            "run with that region applied; nothing is persisted across restarts. "
+            "No effect in mouse-fallback mode."
         ),
     )
     parser.add_argument(
@@ -183,17 +211,22 @@ def make_touch_provider(args: argparse.Namespace):
     return KeyboardMockProvider()
 
 
-def make_tracker(args: argparse.Namespace):
+def make_tracker(args: argparse.Namespace, search_region: Rect | None = None):
     """Picks the position-tracking driver: `OpticalColorTracker` if
     `--tracker=optical-color` was given, else the v1 mouse fallback. Mirrors
     `make_touch_provider`'s `--ble-address` selection pattern above.
+
+    `search_region` (resolved by `run()`'s `--adjust-tracking-region` setup
+    step, before this is called) is applied to the raw `OpticalColorTracker`
+    *before* any `--debug-camera` wrapping, so it takes effect regardless of
+    whether debug preview is also enabled.
 
     `--debug-camera` wraps the optical tracker in `DebugPreviewTracker`
     (transparent to the telemetry loop -- same `get_position` contract),
     popping up a local OpenCV preview window of what it's actually seeing.
     """
     if args.tracker == "optical-color":
-        tracker = OpticalColorTracker()
+        tracker = OpticalColorTracker(search_region=search_region)
         if args.debug_camera:
             tracker = DebugPreviewTracker(tracker)
         return tracker
@@ -284,11 +317,28 @@ def make_ai_timeout_s(args: argparse.Namespace) -> float:
 
 
 async def run(args: argparse.Namespace) -> None:
-    tracker = make_tracker(args)
+    # Built first (and reused for the picker below, never opened twice) --
+    # make_tracker needs the resolved search_region before it constructs
+    # the real OpticalColorTracker, and the picker needs this same
+    # image_source's capture_frame to show a live preview.
+    image_source, homography, loss_bridge = make_camera_resources(args)
+
+    search_region = None
+    if args.tracker == "optical-color" and args.adjust_tracking_region:
+        print(
+            "Adjust Tracking Region: drag a rectangle over the live preview, "
+            "Enter/Space to confirm (or accept the full frame), Esc to redraw."
+        )
+        search_region = pick_tracking_region(image_source.capture_frame)
+        if search_region is not None:
+            logger.info("Tracking region set to %r", search_region)
+        else:
+            logger.info("No tracking region selected; searching the full camera frame.")
+
+    tracker = make_tracker(args, search_region=search_region)
     touch_provider = make_touch_provider(args)
     vision_client, ai_model = make_vision_client(args)
     ai_timeout_s = make_ai_timeout_s(args)
-    image_source, homography, loss_bridge = make_camera_resources(args)
 
     if isinstance(touch_provider, KeyboardMockProvider):
         from pynput.mouse import Listener

@@ -75,6 +75,13 @@ def test_debug_preview_tracker_shows_an_annotated_frame_each_call():
     assert not np.array_equal(annotated, frame)
 
 
+def test_debug_preview_tracker_exposes_the_wrapped_tracker_via_inner():
+    inner = _FakeTracker((0.0, 0.0, False))
+    tracker = DebugPreviewTracker(inner, show_frame=lambda name, frame: None)
+
+    assert tracker.inner is inner
+
+
 def test_debug_preview_tracker_handles_a_none_frame_without_crashing():
     inner = _FakeTracker((0.0, 0.0, False))
     shown = []

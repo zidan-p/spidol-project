@@ -160,6 +160,15 @@ def test_optical_color_tracker_set_search_region_none_restores_full_frame_search
     assert is_detected is True
 
 
+def test_optical_color_tracker_search_region_property_reflects_constructor_and_setter():
+    tracker = OpticalColorTracker()
+    assert tracker.search_region is None
+
+    region = Rect(x=1, y=2, width=3, height=4)
+    tracker.set_search_region(region)
+    assert tracker.search_region == region
+
+
 def test_optical_color_tracker_handles_a_region_entirely_outside_the_frame_without_crashing():
     tracker = OpticalColorTracker(search_region=Rect(x=10000, y=10000, width=50, height=50))
     frame = make_frame_with_blob((100, 100))

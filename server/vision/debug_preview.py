@@ -67,6 +67,14 @@ class DebugPreviewTracker:
         self._show_frame = show_frame
         self._window_name = window_name
 
+    @property
+    def inner(self):
+        """The wrapped tracker -- e.g. so `main.py` can apply a picked
+        Adjustable Tracking Region (docs/specs/0002-...) to the real
+        `OpticalColorTracker` even when it's wrapped for `--debug-camera`.
+        """
+        return self._inner
+
     def get_position(self, frame: np.ndarray | None) -> tuple[float, float, bool]:
         x, y, is_detected = self._inner.get_position(frame)
         if frame is not None:

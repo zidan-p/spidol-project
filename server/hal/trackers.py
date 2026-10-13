@@ -112,6 +112,10 @@ class OpticalColorTracker(BasePositionTracker):
         """
         self._search_region = region
 
+    @property
+    def search_region(self) -> Rect | None:
+        return self._search_region
+
     def get_position(self, frame: np.ndarray | None) -> tuple[float, float, bool]:
         if frame is None or frame.size == 0:
             return 0.0, 0.0, False
