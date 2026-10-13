@@ -21,6 +21,12 @@ from dataclasses import dataclass
 
 
 @dataclass(frozen=True)
+class Point:
+    x: int
+    y: int
+
+
+@dataclass(frozen=True)
 class Rect:
     """A pixel-space rectangle in the camera frame: `(x, y)` is the
     top-left corner, always the min corner of whatever two points the
@@ -32,12 +38,19 @@ class Rect:
     width: int
     height: int
 
+    @property
+    def has_area(self) -> bool:
+        """False for a degenerate rect (a plain click with no drag) --
+        `confirm()` asks the rect itself rather than inspecting its fields.
+        """
+        return self.width > 0 and self.height > 0
 
-def _rect_from_corners(a: tuple[int, int], b: tuple[int, int]) -> Rect:
-    x = min(a[0], b[0])
-    y = min(a[1], b[1])
-    width = abs(a[0] - b[0])
-    height = abs(a[1] - b[1])
+
+def _rect_from_corners(a: Point, b: Point) -> Rect:
+    x = min(a.x, b.x)
+    y = min(a.y, b.y)
+    width = abs(a.x - b.x)
+    height = abs(a.y - b.y)
     return Rect(x=x, y=y, width=width, height=height)
 
 
@@ -47,12 +60,14 @@ class RegionSelector:
     `on_mouse_down`/`on_mouse_move`/`on_mouse_up` track a rectangle being
     dragged out (normalized to a non-negative width/height regardless of
     drag direction); `confirm()` locks the current provisional rectangle in
-    as `confirmed`, and `discard()` clears both so the operator can redraw.
+    as `confirmed`, and `discard()` clears the in-progress drag so the
+    operator can redraw -- it does not un-confirm an already-`confirm()`ed
+    selection, which is a separate concern this method isn't asked to touch.
     """
 
     def __init__(self) -> None:
         self._dragging = False
-        self._drag_start: tuple[int, int] | None = None
+        self._drag_start: Point | None = None
         self._provisional: Rect | None = None
         self._confirmed: Rect | None = None
 
@@ -64,27 +79,27 @@ class RegionSelector:
     def confirmed(self) -> Rect | None:
         return self._confirmed
 
-    def on_mouse_down(self, x: int, y: int) -> None:
+    def on_mouse_down(self, point: Point) -> None:
         # Always starts a fresh drag, regardless of any prior
         # provisional/confirmed state -- in the real flow a new drag only
         # ever happens after a `discard()` (ticket 3's wrapper exits its
         # loop immediately on `confirm()`), but this stays well-defined
         # even if called again anyway.
         self._dragging = True
-        self._drag_start = (x, y)
-        self._provisional = Rect(x=x, y=y, width=0, height=0)
+        self._drag_start = point
+        self._provisional = Rect(x=point.x, y=point.y, width=0, height=0)
 
-    def on_mouse_move(self, x: int, y: int) -> None:
+    def on_mouse_move(self, point: Point) -> None:
         if not self._dragging or self._drag_start is None:
             return
-        self._provisional = _rect_from_corners(self._drag_start, (x, y))
+        self._provisional = _rect_from_corners(self._drag_start, point)
 
-    def on_mouse_up(self, x: int, y: int) -> None:
+    def on_mouse_up(self, point: Point) -> None:
         if not self._dragging:
             return
         self._dragging = False
         if self._drag_start is not None:
-            self._provisional = _rect_from_corners(self._drag_start, (x, y))
+            self._provisional = _rect_from_corners(self._drag_start, point)
 
     def confirm(self) -> None:
         """Locks in the current provisional rectangle, if any. A no-op --
@@ -93,12 +108,13 @@ class RegionSelector:
         the full-frame default in ticket 3's real-I/O wrapper, matching the
         "confirm without touching anything" story.
         """
-        if self._provisional is not None and self._provisional.width > 0 and self._provisional.height > 0:
+        if self._provisional is not None and self._provisional.has_area:
             self._confirmed = self._provisional
 
     def discard(self) -> None:
-        """Clears the provisional rectangle (and any prior confirmation)
-        so the operator can redraw from scratch.
+        """Clears the provisional rectangle so the operator can redraw from
+        scratch. Leaves an already-confirmed selection untouched -- this is
+        about abandoning an in-progress/unconfirmed drag, not un-confirming
+        a prior `confirm()`.
         """
         self._provisional = None
-        self._confirmed = None
