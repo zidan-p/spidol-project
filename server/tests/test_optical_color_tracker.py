@@ -10,6 +10,7 @@ import pytest
 
 from hal.interfaces import BasePositionTracker
 from hal.trackers import OpticalColorTracker
+from vision.region_selector import Rect
 
 FRAME_WIDTH = 640
 FRAME_HEIGHT = 480
@@ -91,3 +92,78 @@ def test_optical_color_tracker_accepts_custom_hsv_range_for_different_pen_tip_co
     assert is_detected is True
     assert x == pytest.approx(200 / FRAME_WIDTH, abs=0.01)
     assert y == pytest.approx(150 / FRAME_HEIGHT, abs=0.01)
+
+
+# Adjustable Tracking Region (docs/specs/0002-adjustable-tracking-region.md,
+# ticket 1): restricting the color/contour search to a configured sub-region
+# of the frame, so a stray blob elsewhere in the room is never detected.
+
+
+def test_optical_color_tracker_detects_blob_inside_configured_region():
+    region = Rect(x=50, y=50, width=200, height=200)
+    tracker = OpticalColorTracker(search_region=region)
+    px, py = 100, 100  # inside the region
+    frame = make_frame_with_blob((px, py))
+
+    x, y, is_detected = tracker.get_position(frame)
+
+    assert is_detected is True
+    assert x == pytest.approx(px / FRAME_WIDTH, abs=0.01)
+    assert y == pytest.approx(py / FRAME_HEIGHT, abs=0.01)
+
+
+def test_optical_color_tracker_ignores_blob_outside_configured_region():
+    region = Rect(x=50, y=50, width=100, height=100)  # covers x:50-150, y:50-150
+    tracker = OpticalColorTracker(search_region=region)
+    frame = make_frame_with_blob((500, 400))  # well outside the region
+
+    x, y, is_detected = tracker.get_position(frame)
+
+    assert is_detected is False
+
+
+def test_optical_color_tracker_reports_full_frame_normalized_position_even_when_restricted_to_a_region():
+    # The reported x/y must stay normalized against the FULL frame, not the
+    # cropped sub-region -- otherwise downstream consumers (homography,
+    # canvas mapping) would see a position silently shifted/scaled.
+    region = Rect(x=200, y=150, width=300, height=250)
+    tracker = OpticalColorTracker(search_region=region)
+    px, py = 350, 300  # inside the region, far from the region's own origin
+    frame = make_frame_with_blob((px, py))
+
+    x, y, is_detected = tracker.get_position(frame)
+
+    assert is_detected is True
+    assert x == pytest.approx(px / FRAME_WIDTH, abs=0.01)
+    assert y == pytest.approx(py / FRAME_HEIGHT, abs=0.01)
+
+
+def test_optical_color_tracker_set_search_region_restricts_search_after_construction():
+    tracker = OpticalColorTracker()
+    frame = make_frame_with_blob((500, 400))
+
+    _, _, is_detected_before = tracker.get_position(frame)
+    assert is_detected_before is True
+
+    tracker.set_search_region(Rect(x=0, y=0, width=100, height=100))
+    _, _, is_detected_after = tracker.get_position(frame)
+    assert is_detected_after is False
+
+
+def test_optical_color_tracker_set_search_region_none_restores_full_frame_search():
+    tracker = OpticalColorTracker(search_region=Rect(x=0, y=0, width=100, height=100))
+    frame = make_frame_with_blob((500, 400))
+
+    tracker.set_search_region(None)
+    _, _, is_detected = tracker.get_position(frame)
+
+    assert is_detected is True
+
+
+def test_optical_color_tracker_handles_a_region_entirely_outside_the_frame_without_crashing():
+    tracker = OpticalColorTracker(search_region=Rect(x=10000, y=10000, width=50, height=50))
+    frame = make_frame_with_blob((100, 100))
+
+    x, y, is_detected = tracker.get_position(frame)
+
+    assert is_detected is False
