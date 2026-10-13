@@ -9,6 +9,7 @@ from hal.image_source import (
     BlankCanvasImageSource,
     BrowserCanvasImageSource,
     CameraImageSource,
+    HttpCameraImageSource,
 )
 
 
@@ -85,6 +86,58 @@ def test_camera_image_source_falls_back_to_blank_frame_when_read_fails():
 
     source = CameraImageSource(
         camera_index=0, capture_factory=lambda index: _FailingCapture(index)
+    )
+
+    frame = source.capture_frame()
+
+    assert isinstance(frame, np.ndarray)
+    assert frame.shape == (720, 1280, 3)
+
+
+# HttpCameraImageSource (a phone running an "IP Webcam"-style app, streaming
+# MJPEG over HTTP -- e.g. http://127.0.0.1:8081/video -- rather than a
+# USB/UVC device). Reuses `_FakeVideoCapture` since `cv2.VideoCapture` opens
+# both a device index and a stream URL through the same `read()`/`release()`
+# interface -- only what's passed to `capture_factory` differs.
+
+
+def test_http_camera_image_source_is_a_base_image_source():
+    source = HttpCameraImageSource(url="http://127.0.0.1:8081/video", capture_factory=_FakeVideoCapture)
+    assert isinstance(source, BaseImageSource)
+
+
+def test_http_camera_image_source_opens_the_requested_url():
+    captured = {}
+
+    def factory(url):
+        captured["url"] = url
+        return _FakeVideoCapture(url)
+
+    HttpCameraImageSource(url="http://127.0.0.1:8081/video", capture_factory=factory)
+
+    assert captured["url"] == "http://127.0.0.1:8081/video"
+
+
+def test_http_camera_image_source_returns_the_captured_frame():
+    frame = np.full((480, 640, 3), 42, dtype=np.uint8)
+    source = HttpCameraImageSource(
+        url="http://127.0.0.1:8081/video",
+        capture_factory=lambda url: _FakeVideoCapture(url, frame=frame),
+    )
+
+    result = source.capture_frame()
+
+    assert result is frame
+
+
+def test_http_camera_image_source_falls_back_to_blank_frame_when_read_fails():
+    class _FailingCapture(_FakeVideoCapture):
+        def read(self):
+            return False, None
+
+    source = HttpCameraImageSource(
+        url="http://127.0.0.1:8081/video",
+        capture_factory=lambda url: _FailingCapture(url),
     )
 
     frame = source.capture_frame()

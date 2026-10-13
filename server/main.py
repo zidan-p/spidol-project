@@ -12,8 +12,12 @@ comes from `SystemMouseFallbackTracker`, and the Touch Signal stand-in comes
 from the left mouse button via `KeyboardMockProvider`, bridged by a pynput
 click listener. `OpticalColorTracker` (ticket 02, real camera-based position
 tracking) is wired in behind `--tracker=optical-color`: it selects a real
-`CameraImageSource` (instead of `BlankCanvasImageSource`) plus a
-`HomographyCalibrator` and `TrackingLossBridge`, all passed into
+`CameraImageSource` (a USB/UVC device index, instead of
+`BlankCanvasImageSource`) -- or, with `--camera-url`, `HttpCameraImageSource`
+instead (a camera streamed over HTTP, e.g. a phone running an "IP Webcam"-
+style app at a URL like `http://127.0.0.1:8081/video`; takes precedence over
+`--camera-index` when both are given) -- plus a `HomographyCalibrator` and
+`TrackingLossBridge`, all passed into
 `server_app.create_server`, which feeds a real captured frame into the
 tracker every telemetry tick and applies homography + tracking-loss bridging
 to its output before broadcasting -- see `make_camera_resources` below and
@@ -63,7 +67,7 @@ from pathlib import Path
 from dotenv import load_dotenv
 
 from ai.vision_pipeline import DEFAULT_BASE_URL, DEFAULT_MODEL, make_live_client
-from hal.image_source import BrowserCanvasImageSource, CameraImageSource
+from hal.image_source import BrowserCanvasImageSource, CameraImageSource, HttpCameraImageSource
 from hal.providers import BleTouchProvider, KeyboardMockProvider, WifiTouchProvider
 from hal.trackers import OpticalColorTracker, SystemMouseFallbackTracker
 from server_app import create_server
@@ -110,7 +114,18 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         type=int,
         default=0,
         help="OpenCV camera index to open when --tracker=optical-color (RemoteCam "
-        "exposes itself as a standard UVC webcam, see docs/adr/0003).",
+        "exposes itself as a standard UVC webcam, see docs/adr/0003). Ignored if "
+        "--camera-url is given.",
+    )
+    parser.add_argument(
+        "--camera-url",
+        default=None,
+        help=(
+            "When --tracker=optical-color, stream the camera over HTTP instead of "
+            "a USB/UVC device index -- e.g. a phone running an 'IP Webcam'-style "
+            "Android app, served at a URL like http://127.0.0.1:8081/video. Takes "
+            "precedence over --camera-index when both are given."
+        ),
     )
     parser.add_argument(
         "--debug-camera",
@@ -269,14 +284,23 @@ def make_camera_resources(args: argparse.Namespace, capture_factory=None):
     drawn even with no real camera wired -- `BlankCanvasImageSource`'s fixed
     blank frame meant the live vision model could never recognize anything.
 
-    `capture_factory` is forwarded to `CameraImageSource` purely so tests can
-    avoid opening a real camera device (see hal/image_source.py).
+    `capture_factory` is forwarded to whichever image source gets
+    constructed purely so tests can avoid opening a real camera device/
+    network stream (see hal/image_source.py).
+
+    `--camera-url`, if given, selects `HttpCameraImageSource` (a camera
+    streamed over HTTP, e.g. a phone running an "IP Webcam"-style app)
+    instead of `CameraImageSource` (a USB/UVC device index) -- takes
+    precedence over `--camera-index` when both are set.
     """
     if args.tracker != "optical-color":
         return BrowserCanvasImageSource(), None, None
 
     kwargs = {} if capture_factory is None else {"capture_factory": capture_factory}
-    image_source = CameraImageSource(camera_index=args.camera_index, **kwargs)
+    if args.camera_url:
+        image_source = HttpCameraImageSource(url=args.camera_url, **kwargs)
+    else:
+        image_source = CameraImageSource(camera_index=args.camera_index, **kwargs)
     homography = HomographyCalibrator()
     loss_bridge = TrackingLossBridge()
     return image_source, homography, loss_bridge

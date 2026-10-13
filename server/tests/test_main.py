@@ -5,7 +5,7 @@ real Stylus firmware via `BleTouchProvider`."""
 from pynput.mouse import Button
 
 from main import make_camera_resources, make_click_handler, make_touch_provider, make_tracker, parse_args
-from hal.image_source import BrowserCanvasImageSource, CameraImageSource
+from hal.image_source import BrowserCanvasImageSource, CameraImageSource, HttpCameraImageSource
 from hal.providers import BleTouchProvider, KeyboardMockProvider, WifiTouchProvider
 from hal.trackers import OpticalColorTracker, SystemMouseFallbackTracker
 from vision.debug_preview import DebugPreviewTracker
@@ -175,11 +175,13 @@ def test_make_tracker_ignores_search_region_in_mouse_mode():
 
 
 class _FakeVideoCapture:
-    """Avoids opening a real camera device in CI (see hal/image_source.py's
-    test suite for the same seam)."""
+    """Avoids opening a real camera device/network stream in CI (see
+    hal/image_source.py's test suite for the same seam). Works for both
+    CameraImageSource (passed an int index) and HttpCameraImageSource
+    (passed a URL string) -- it doesn't care which."""
 
-    def __init__(self, index):
-        self.index = index
+    def __init__(self, index_or_url):
+        self.index_or_url = index_or_url
 
     def read(self):
         return False, None
@@ -206,3 +208,42 @@ def test_make_camera_resources_returns_camera_backed_resources_for_optical_color
     assert isinstance(image_source, CameraImageSource)
     assert isinstance(homography, HomographyCalibrator)
     assert isinstance(loss_bridge, TrackingLossBridge)
+
+
+def test_parse_args_defaults_camera_url_to_none():
+    args = parse_args([])
+    assert args.camera_url is None
+
+
+def test_parse_args_recognizes_camera_url_flag():
+    args = parse_args(["--tracker", "optical-color", "--camera-url", "http://127.0.0.1:8081/video"])
+    assert args.camera_url == "http://127.0.0.1:8081/video"
+
+
+def test_make_camera_resources_returns_http_camera_source_when_camera_url_given():
+    args = parse_args(
+        ["--tracker", "optical-color", "--camera-url", "http://127.0.0.1:8081/video"]
+    )
+    image_source, homography, loss_bridge = make_camera_resources(
+        args, capture_factory=_FakeVideoCapture
+    )
+
+    assert isinstance(image_source, HttpCameraImageSource)
+    assert isinstance(homography, HomographyCalibrator)
+    assert isinstance(loss_bridge, TrackingLossBridge)
+
+
+def test_make_camera_resources_prefers_camera_url_over_camera_index_if_both_given():
+    args = parse_args(
+        [
+            "--tracker",
+            "optical-color",
+            "--camera-index",
+            "2",
+            "--camera-url",
+            "http://127.0.0.1:8081/video",
+        ]
+    )
+    image_source, _, _ = make_camera_resources(args, capture_factory=_FakeVideoCapture)
+
+    assert isinstance(image_source, HttpCameraImageSource)

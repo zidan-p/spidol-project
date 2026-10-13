@@ -80,6 +80,50 @@ class CameraImageSource(BaseImageSource):
         self._capture.release()
 
 
+class HttpCameraImageSource(BaseImageSource):
+    """Real-camera `BaseImageSource` for a camera streamed over HTTP --
+    e.g. a phone running an "IP Webcam"-style Android app, exposing an
+    MJPEG stream at a URL like `http://127.0.0.1:8081/video` -- rather than
+    a USB/UVC device (`CameraImageSource`'s `camera_index`). `cv2.VideoCapture`
+    opens an MJPEG-over-HTTP URL the same way it opens a device index (same
+    `read()`/`release()` interface via its FFMPEG backend), so this is
+    structurally identical to `CameraImageSource`, just opened by URL.
+
+    `capture_factory` defaults to `cv2.VideoCapture` but is a constructor
+    parameter precisely so tests can inject a fake capture object (no real
+    network camera needed), mirroring `CameraImageSource`'s own seam.
+    """
+
+    def __init__(
+        self,
+        url: str,
+        width: int = 1280,
+        height: int = 720,
+        capture_factory=None,
+    ):
+        if capture_factory is None:
+            import cv2
+
+            capture_factory = cv2.VideoCapture
+
+        self._width = width
+        self._height = height
+        self._capture = capture_factory(url)
+
+    def capture_frame(self) -> np.ndarray:
+        ok, frame = self._capture.read()
+        if not ok or frame is None:
+            # Stream hiccup (dropped WiFi, phone app backgrounded, etc.) --
+            # fall back to a blank frame rather than raising, same as
+            # CameraImageSource, so one dropped frame doesn't crash the
+            # telemetry loop or an AI Trigger crop.
+            return np.full((self._height, self._width, 3), 255, dtype=np.uint8)
+        return frame
+
+    def release(self) -> None:
+        self._capture.release()
+
+
 class BrowserCanvasImageSource(BaseImageSource):
     """`BaseImageSource` fed by the frontend's own canvas pixels over the
     WebSocket (`set_frame_from_png_bytes`, called from the server's
