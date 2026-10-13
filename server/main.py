@@ -66,7 +66,7 @@ from pathlib import Path
 
 from dotenv import load_dotenv
 
-from ai.vision_pipeline import DEFAULT_BASE_URL, DEFAULT_MODEL, make_live_client
+from ai.vision_pipeline import DEFAULT_BASE_URL, DEFAULT_MODEL, LazyOpenAIClient
 from hal.image_source import BrowserCanvasImageSource, CameraImageSource, HttpCameraImageSource
 from hal.providers import BleTouchProvider, KeyboardMockProvider, WifiTouchProvider
 from hal.trackers import OpticalColorTracker, SystemMouseFallbackTracker
@@ -307,11 +307,18 @@ def make_camera_resources(args: argparse.Namespace, capture_factory=None):
 
 
 def make_vision_client(args: argparse.Namespace):
-    """Constructs the live OpenAI-compatible vision client if AI_API_KEY (or
-    the legacy GEMINI_API_KEY) is configured, else returns None -- every AI
-    Trigger then serves the Cached Fallback Schema (see
-    ai/vision_pipeline.py), so the server still runs and demos correctly
-    without a key configured.
+    """Returns a vision client if AI_API_KEY (or the legacy GEMINI_API_KEY)
+    is configured, else None -- every AI Trigger then serves the Cached
+    Fallback Schema (see ai/vision_pipeline.py), so the server still runs
+    and demos correctly without a key configured.
+
+    Returns a `LazyOpenAIClient`, not an already-constructed real one:
+    importing the `openai` SDK (and its dependency tree) costs roughly 1-2s
+    the first time in a process, and this is called during every server
+    startup that has a key configured -- regardless of whether a session
+    ever actually fires an AI Trigger. Deferring that cost to the first
+    real AI Trigger keeps startup (camera/tracking-region setup included)
+    from paying it every time.
 
     `--ai-base-url`/AI_BASE_URL let this point at any OpenAI-compatible
     endpoint -- Gemini's own (the default), OpenRouter
@@ -325,7 +332,7 @@ def make_vision_client(args: argparse.Namespace):
 
     base_url = args.ai_base_url or os.environ.get("AI_BASE_URL") or DEFAULT_BASE_URL
     model = args.ai_model or os.environ.get("AI_MODEL") or DEFAULT_MODEL
-    return make_live_client(api_key=api_key, base_url=base_url), model
+    return LazyOpenAIClient(api_key=api_key, base_url=base_url), model
 
 
 def make_ai_timeout_s(args: argparse.Namespace) -> float:

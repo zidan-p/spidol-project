@@ -232,6 +232,35 @@ def make_live_client(api_key: str | None = None, base_url: str = DEFAULT_BASE_UR
     return OpenAI(api_key=api_key, base_url=base_url)
 
 
+class LazyOpenAIClient:
+    """Defers calling `make_live_client` (and the `openai` import inside
+    it) until the first actual use, not server startup. Importing `openai`
+    (and its dependency tree -- httpx, pydantic, ...) costs roughly 1-2s
+    the first time in a process; constructing the client itself is fast.
+    Without this, every server startup with an API key configured paid
+    that import cost up front, even for a session that never actually
+    fires an AI Trigger.
+
+    Duck-types `.chat` (the only attribute `_call_model` touches:
+    `client.chat.completions.create(...)`) so it's a drop-in substitute for
+    `make_live_client`'s return value wherever `vision_client` flows
+    (`ai/trigger.py`, `ai/dispatch.py`, `server_app.py`) -- none of that
+    code needs to change, or even know this wrapper exists.
+    """
+
+    def __init__(self, api_key: str | None, base_url: str, client_factory=make_live_client):
+        self._api_key = api_key
+        self._base_url = base_url
+        self._client_factory = client_factory
+        self._real_client = None
+
+    @property
+    def chat(self):
+        if self._real_client is None:
+            self._real_client = self._client_factory(api_key=self._api_key, base_url=self._base_url)
+        return self._real_client.chat
+
+
 def _image_data_url(image_bytes: bytes) -> str:
     return f"data:image/png;base64,{base64.b64encode(image_bytes).decode('ascii')}"
 

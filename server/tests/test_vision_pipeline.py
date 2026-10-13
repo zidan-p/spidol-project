@@ -17,6 +17,7 @@ import pytest
 from ai.vision_pipeline import (
     CACHED_FALLBACK_SCHEMA,
     FormulaAnalysis,
+    LazyOpenAIClient,
     SimulationType,
     analyze_formula_crop,
     is_supported_simulation_type,
@@ -101,6 +102,68 @@ def test_timeout_falls_back_to_cached_schema():
     result = analyze_formula_crop(b"fake-png-bytes", client, timeout_s=0.05)
 
     assert result == CACHED_FALLBACK_SCHEMA
+
+
+# LazyOpenAIClient: defers the real `make_live_client` call (and the
+# `openai` import inside it -- ~1-2s the first time in a process) until the
+# first actual AI Trigger, not server startup. Duck-types `.chat` so it's a
+# drop-in substitute anywhere `vision_client` flows (ai/trigger.py,
+# ai/dispatch.py, server_app.py) -- none of that code needs to know this
+# wrapper exists.
+
+
+def test_lazy_openai_client_does_not_construct_the_real_client_at_construction_time():
+    calls = []
+
+    def fake_factory(api_key, base_url):
+        calls.append((api_key, base_url))
+        return _FakeClient(response_text=SPRING_MASS_JSON)
+
+    LazyOpenAIClient(api_key="key", base_url="https://example.com", client_factory=fake_factory)
+
+    assert calls == []
+
+
+def test_lazy_openai_client_constructs_the_real_client_on_first_chat_access():
+    calls = []
+
+    def fake_factory(api_key, base_url):
+        calls.append((api_key, base_url))
+        return _FakeClient(response_text=SPRING_MASS_JSON)
+
+    client = LazyOpenAIClient(api_key="key", base_url="https://example.com", client_factory=fake_factory)
+    _ = client.chat
+
+    assert calls == [("key", "https://example.com")]
+
+
+def test_lazy_openai_client_only_constructs_the_real_client_once():
+    calls = []
+
+    def fake_factory(api_key, base_url):
+        calls.append(1)
+        return _FakeClient(response_text=SPRING_MASS_JSON)
+
+    client = LazyOpenAIClient(api_key="key", base_url="https://example.com", client_factory=fake_factory)
+
+    _ = client.chat
+    _ = client.chat
+    _ = client.chat
+
+    assert calls == [1]
+
+
+def test_lazy_openai_client_works_as_a_drop_in_client_for_analyze_formula_crop():
+    # The actual point of this class: analyze_formula_crop (and everything
+    # upstream of it) never needs to know it's holding a lazy wrapper
+    # instead of a real constructed client.
+    real_fake = _FakeClient(response_text=SPRING_MASS_JSON)
+    client = LazyOpenAIClient(api_key="key", base_url="https://example.com", client_factory=lambda **_: real_fake)
+
+    result = analyze_formula_crop(b"fake-png-bytes", client, timeout_s=3.0)
+
+    assert isinstance(result, FormulaAnalysis)
+    assert result.simulation_type == "spring_mass"
 
 
 def test_no_client_configured_falls_back_to_cached_schema_without_crashing():
