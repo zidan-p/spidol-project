@@ -69,9 +69,12 @@ class DebugPreviewTracker:
 
     @property
     def inner(self):
-        """The wrapped tracker -- e.g. so `main.py` can apply a picked
-        Adjustable Tracking Region (docs/specs/0002-...) to the real
-        `OpticalColorTracker` even when it's wrapped for `--debug-camera`.
+        """The wrapped tracker -- exposed so tests (and any other caller
+        that needs to reach through the wrapper) can introspect the real
+        tracker underneath, e.g. asserting an Adjustable Tracking Region
+        (docs/specs/0002-...) was applied to it. `main.py` itself doesn't
+        need this: it applies that region to the raw `OpticalColorTracker`
+        *before* any `--debug-camera` wrapping happens.
         """
         return self._inner
 
