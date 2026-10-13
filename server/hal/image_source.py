@@ -12,6 +12,7 @@ anticipated -- when `--tracker=optical-color` is selected, `main.py` passes a
 the AI Trigger crop see a real frame. No change to the trigger pipeline
 itself was needed; it was already written against `BaseImageSource`.
 """
+import threading
 from abc import ABC, abstractmethod
 
 import numpy as np
@@ -87,11 +88,27 @@ class HttpCameraImageSource(BaseImageSource):
     a USB/UVC device (`CameraImageSource`'s `camera_index`). `cv2.VideoCapture`
     opens an MJPEG-over-HTTP URL the same way it opens a device index (same
     `read()`/`release()` interface via its FFMPEG backend), so this is
-    structurally identical to `CameraImageSource`, just opened by URL.
+    structurally similar to `CameraImageSource`, just opened by URL -- but
+    with one deliberate difference, see below.
+
+    A background thread continuously drains `read()` as fast as the stream
+    delivers frames and keeps only the most recently read one. Without
+    this, `capture_frame()` calling `read()` directly, once per telemetry
+    tick, hits a well-known `cv2.VideoCapture` + network-stream gotcha: each
+    individual `read()` call is fast, but if the stream produces frames
+    faster than the tick rate drains them, a backlog queues up internally
+    and `read()` returns the *oldest* unread frame, not the newest -- so the
+    displayed/tracked video lags further and further behind real time, even
+    though every call itself measures as fast. A local USB/UVC device
+    (`CameraImageSource`) doesn't typically buffer this way, so it's kept
+    simpler; this class exists specifically because a phone's network
+    stream does.
 
     `capture_factory` defaults to `cv2.VideoCapture` but is a constructor
     parameter precisely so tests can inject a fake capture object (no real
     network camera needed), mirroring `CameraImageSource`'s own seam.
+    `start_reader_thread` defaults to `True` for real use; tests pass
+    `False` to drive `_read_once()` directly and deterministically instead.
     """
 
     def __init__(
@@ -100,6 +117,7 @@ class HttpCameraImageSource(BaseImageSource):
         width: int = 1280,
         height: int = 720,
         capture_factory=None,
+        start_reader_thread: bool = True,
     ):
         if capture_factory is None:
             import cv2
@@ -110,17 +128,49 @@ class HttpCameraImageSource(BaseImageSource):
         self._height = height
         self._capture = capture_factory(url)
 
-    def capture_frame(self) -> np.ndarray:
+        self._lock = threading.Lock()
+        self._latest_frame: np.ndarray | None = None
+        self._stop = threading.Event()
+        self._reader_thread: threading.Thread | None = None
+        if start_reader_thread:
+            self._reader_thread = threading.Thread(target=self._reader_loop, daemon=True)
+            self._reader_thread.start()
+
+    def _read_once(self) -> bool:
+        """Reads one frame and stores it as the latest if successful;
+        returns whether a frame was captured. Exposed separately from
+        `_reader_loop` so tests can drive it directly, with no real
+        threading involved.
+        """
         ok, frame = self._capture.read()
-        if not ok or frame is None:
-            # Stream hiccup (dropped WiFi, phone app backgrounded, etc.) --
-            # fall back to a blank frame rather than raising, same as
-            # CameraImageSource, so one dropped frame doesn't crash the
-            # telemetry loop or an AI Trigger crop.
+        if ok and frame is not None:
+            with self._lock:
+                self._latest_frame = frame
+            return True
+        return False
+
+    def _reader_loop(self) -> None:
+        while not self._stop.is_set():
+            if not self._read_once():
+                # Back off on a failed read (stream hiccup, dropped WiFi)
+                # instead of busy-retrying at full speed.
+                self._stop.wait(0.01)
+
+    def capture_frame(self) -> np.ndarray:
+        with self._lock:
+            frame = self._latest_frame
+        if frame is None:
+            # No frame read yet (or every read so far has failed) -- fall
+            # back to a blank frame rather than raising, same as
+            # CameraImageSource, so this never crashes the telemetry loop
+            # or an AI Trigger crop.
             return np.full((self._height, self._width, 3), 255, dtype=np.uint8)
         return frame
 
     def release(self) -> None:
+        self._stop.set()
+        if self._reader_thread is not None:
+            self._reader_thread.join(timeout=1.0)
         self._capture.release()
 
 

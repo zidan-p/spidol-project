@@ -1,6 +1,8 @@
 """Tests for the camera-frame source stub (ticket 02 isn't built yet; see
 `hal/image_source.py` docstring for the documented stand-in decision).
 """
+import time
+
 import cv2
 import numpy as np
 
@@ -99,10 +101,40 @@ def test_camera_image_source_falls_back_to_blank_frame_when_read_fails():
 # USB/UVC device). Reuses `_FakeVideoCapture` since `cv2.VideoCapture` opens
 # both a device index and a stream URL through the same `read()`/`release()`
 # interface -- only what's passed to `capture_factory` differs.
+#
+# `start_reader_thread=False` is passed in most tests below so they can
+# drive `_read_once()` directly and deterministically -- the real
+# background-draining thread (the actual point of this class, see its
+# docstring) is only exercised with real threading in the two tests at the
+# end, which tolerate a short real sleep instead of asserting exact timing.
+
+
+class _SequenceVideoCapture:
+    """Returns a different frame on each successive `read()` call (from a
+    fixed sequence, repeating the last one once exhausted) -- stands in for
+    a real network stream that keeps producing new frames over time, unlike
+    `_FakeVideoCapture`'s single fixed frame.
+    """
+
+    def __init__(self, url, frames):
+        self.url = url
+        self._frames = frames
+        self._index = 0
+        self.released = False
+
+    def read(self):
+        frame = self._frames[min(self._index, len(self._frames) - 1)]
+        self._index += 1
+        return True, frame
+
+    def release(self):
+        self.released = True
 
 
 def test_http_camera_image_source_is_a_base_image_source():
-    source = HttpCameraImageSource(url="http://127.0.0.1:8081/video", capture_factory=_FakeVideoCapture)
+    source = HttpCameraImageSource(
+        url="http://127.0.0.1:8081/video", capture_factory=_FakeVideoCapture, start_reader_thread=False
+    )
     assert isinstance(source, BaseImageSource)
 
 
@@ -113,7 +145,7 @@ def test_http_camera_image_source_opens_the_requested_url():
         captured["url"] = url
         return _FakeVideoCapture(url)
 
-    HttpCameraImageSource(url="http://127.0.0.1:8081/video", capture_factory=factory)
+    HttpCameraImageSource(url="http://127.0.0.1:8081/video", capture_factory=factory, start_reader_thread=False)
 
     assert captured["url"] == "http://127.0.0.1:8081/video"
 
@@ -123,8 +155,10 @@ def test_http_camera_image_source_returns_the_captured_frame():
     source = HttpCameraImageSource(
         url="http://127.0.0.1:8081/video",
         capture_factory=lambda url: _FakeVideoCapture(url, frame=frame),
+        start_reader_thread=False,
     )
 
+    source._read_once()
     result = source.capture_frame()
 
     assert result is frame
@@ -138,12 +172,55 @@ def test_http_camera_image_source_falls_back_to_blank_frame_when_read_fails():
     source = HttpCameraImageSource(
         url="http://127.0.0.1:8081/video",
         capture_factory=lambda url: _FailingCapture(url),
+        start_reader_thread=False,
     )
 
+    source._read_once()
     frame = source.capture_frame()
 
     assert isinstance(frame, np.ndarray)
     assert frame.shape == (720, 1280, 3)
+
+
+def test_http_camera_image_source_reports_the_most_recently_read_frame_not_a_stale_one():
+    # The actual bug this class exists to fix: a network/MJPEG stream whose
+    # producer outpaces how often we drain it can leave old frames queued
+    # up -- each individual read() is fast, but without draining to the
+    # latest, capture_frame() would return an increasingly stale frame.
+    # Simulated here by reading several times (as the background thread
+    # would) before ever calling capture_frame().
+    frames = [np.full((480, 640, 3), value, dtype=np.uint8) for value in (1, 2, 3)]
+    source = HttpCameraImageSource(
+        url="http://127.0.0.1:8081/video",
+        capture_factory=lambda url: _SequenceVideoCapture(url, frames),
+        start_reader_thread=False,
+    )
+
+    source._read_once()
+    source._read_once()
+    source._read_once()
+    result = source.capture_frame()
+
+    assert (result == 3).all()
+
+
+def test_http_camera_image_source_background_thread_drains_frames_automatically():
+    # Unlike the tests above (which call _read_once() directly for
+    # determinism), this exercises the real thread -- the actual production
+    # path -- tolerating a short real sleep rather than asserting on exact
+    # timing.
+    frames = [np.full((480, 640, 3), value, dtype=np.uint8) for value in (1, 2, 3)]
+    source = HttpCameraImageSource(
+        url="http://127.0.0.1:8081/video",
+        capture_factory=lambda url: _SequenceVideoCapture(url, frames),
+    )
+    try:
+        deadline = time.monotonic() + 2.0
+        while time.monotonic() < deadline and (source.capture_frame() == 3).all() is False:
+            time.sleep(0.01)
+        assert (source.capture_frame() == 3).all()
+    finally:
+        source.release()
 
 
 def test_browser_canvas_image_source_returns_blank_frame_before_any_snapshot():
