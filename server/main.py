@@ -72,6 +72,7 @@ from ai.vision_pipeline import DEFAULT_BASE_URL, DEFAULT_MODEL, LazyOpenAIClient
 from hal.image_source import BrowserCanvasImageSource, CameraImageSource, HttpCameraImageSource
 from hal.os_cursor_controller import OsCursorController
 from hal.providers import BleTouchProvider, KeyboardMockProvider, WifiTouchProvider
+from hal.smoothing_tracker import SmoothingPositionTracker
 from hal.trackers import OpticalColorTracker, SystemMouseFallbackTracker, detect_screen_size
 from server_app import create_server
 from vision.debug_preview import DebugPreviewTracker
@@ -139,6 +140,19 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
             "typically faces the user directly, so a raw frame moves opposite to "
             "the user's real-world left/right, like a security camera rather than "
             "a mirror."
+        ),
+    )
+    parser.add_argument(
+        "--jitter-smoothing",
+        type=float,
+        default=0.3,
+        help=(
+            "When --tracker=optical-color, exponential-moving-average smoothing "
+            "factor applied to the reported position (hal/smoothing_tracker.py) -- "
+            "OpticalColorTracker's centroid is inherently noisy frame to frame even "
+            "with the marker held still. Lower = smoother but laggier; higher = "
+            "more responsive but jitterier. 1.0 disables smoothing entirely "
+            "(passes the raw position straight through)."
         ),
     )
     parser.add_argument(
@@ -263,15 +277,23 @@ def make_tracker(args: argparse.Namespace, search_region: Quad | None = None):
 
     `search_region` (resolved by `run()`'s `--adjust-tracking-region` setup
     step, before this is called) is applied to the raw `OpticalColorTracker`
-    *before* any `--debug-camera` wrapping, so it takes effect regardless of
-    whether debug preview is also enabled.
+    *before* any wrapping below, so it takes effect regardless of whether
+    smoothing/debug preview are also enabled.
 
-    `--debug-camera` wraps the optical tracker in `DebugPreviewTracker`
-    (transparent to the telemetry loop -- same `get_position` contract),
-    popping up a local OpenCV preview window of what it's actually seeing.
+    Always wrapped in `SmoothingPositionTracker` (EMA jitter smoothing --
+    `OpticalColorTracker`'s centroid is inherently noisy frame to frame
+    even with the marker held still) before any `--debug-camera` wrapping,
+    so the debug overlay shows the same smoothed position actually
+    broadcast, not the noisier raw one.
+
+    `--debug-camera` wraps the (now-smoothed) tracker in
+    `DebugPreviewTracker` (transparent to the telemetry loop -- same
+    `get_position` contract), popping up a local OpenCV preview window of
+    what it's actually seeing.
     """
     if args.tracker == "optical-color":
         tracker = OpticalColorTracker(search_region=search_region)
+        tracker = SmoothingPositionTracker(tracker, alpha=args.jitter_smoothing)
         if args.debug_camera:
             tracker = DebugPreviewTracker(tracker)
         return tracker

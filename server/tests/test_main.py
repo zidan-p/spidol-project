@@ -17,6 +17,7 @@ from main import (
 from hal.os_cursor_controller import OsCursorController
 from hal.image_source import BrowserCanvasImageSource, CameraImageSource, HttpCameraImageSource
 from hal.providers import BleTouchProvider, KeyboardMockProvider, WifiTouchProvider
+from hal.smoothing_tracker import SmoothingPositionTracker
 from hal.trackers import OpticalColorTracker, SystemMouseFallbackTracker
 from vision.debug_preview import DebugPreviewTracker
 from vision.homography import HomographyCalibrator
@@ -123,9 +124,12 @@ def test_make_tracker_returns_system_mouse_fallback_by_default():
 
 
 def test_make_tracker_returns_optical_color_tracker_when_selected():
+    # Always wrapped in SmoothingPositionTracker (jitter smoothing) --
+    # the real OpticalColorTracker is underneath via .inner.
     args = parse_args(["--tracker", "optical-color"])
     tracker = make_tracker(args)
-    assert isinstance(tracker, OpticalColorTracker)
+    assert isinstance(tracker, SmoothingPositionTracker)
+    assert isinstance(tracker.inner, OpticalColorTracker)
 
 
 def test_parse_args_defaults_debug_camera_to_false():
@@ -134,9 +138,24 @@ def test_parse_args_defaults_debug_camera_to_false():
 
 
 def test_make_tracker_wraps_in_debug_preview_tracker_when_flag_set():
+    # DebugPreviewTracker is the outermost wrapper -- SmoothingPosition
+    # Tracker sits between it and the real OpticalColorTracker, so the
+    # debug overlay shows the same smoothed position actually broadcast.
     args = parse_args(["--tracker", "optical-color", "--debug-camera"])
     tracker = make_tracker(args)
     assert isinstance(tracker, DebugPreviewTracker)
+    assert isinstance(tracker.inner, SmoothingPositionTracker)
+    assert isinstance(tracker.inner.inner, OpticalColorTracker)
+
+
+def test_parse_args_defaults_jitter_smoothing_to_0_3():
+    args = parse_args([])
+    assert args.jitter_smoothing == 0.3
+
+
+def test_parse_args_recognizes_jitter_smoothing_flag():
+    args = parse_args(["--tracker", "optical-color", "--jitter-smoothing", "0.5"])
+    assert args.jitter_smoothing == 0.5
 
 
 def test_make_tracker_debug_camera_flag_has_no_effect_in_mouse_mode():
@@ -165,7 +184,8 @@ def test_make_tracker_applies_search_region_to_optical_color_tracker():
 
     tracker = make_tracker(args, search_region=region)
 
-    assert isinstance(tracker, OpticalColorTracker)
+    assert isinstance(tracker, SmoothingPositionTracker)
+    assert isinstance(tracker.inner, OpticalColorTracker)
     assert tracker.search_region == region
 
 
