@@ -110,13 +110,13 @@ class OpticalColorTracker(BasePositionTracker):
 
     # Measured from a real photo of the physical Pen Tip (teal/cyan-blue 3D-
     # printed marker): sampling its body gave hue 90-115 (5th-95th
-    # percentile 95-100), saturation 50-225 (5th-95th 122-206), value
-    # 55-109 (5th-95th 60-91) under dim indoor lighting. Widened a bit
-    # beyond that sample for lighting variation across sessions, while
-    # staying tight enough to exclude background: validated against the
-    # full photo (not just the sampled patch) to confirm one single clean
-    # contour, no stray noise elsewhere in frame.
-    DEFAULT_HSV_LOWER = (90, 80, 40)
+    # percentile 95-100), saturation 50-225 (5th-95th 122-206). The object's
+    # own value (brightness) channel splits close to exactly in half at V=81
+    # (Otsu threshold within just the object's own pixels) between its lit
+    # side and its shadowed underside -- the value lower bound is set just
+    # below that split specifically to exclude the dark/shadowed side,
+    # matching only the brighter-lit side of the marker.
+    DEFAULT_HSV_LOWER = (90, 80, 80)
     DEFAULT_HSV_UPPER = (120, 255, 255)
 
     def __init__(
