@@ -77,7 +77,7 @@ from server_app import create_server
 from vision.debug_preview import DebugPreviewTracker
 from vision.homography import HomographyCalibrator
 from vision.region_picker import pick_tracking_region
-from vision.region_selector import Rect
+from vision.region_selector import Quad
 from vision.tracking_loss import TrackingLossBridge
 
 logger = logging.getLogger(__name__)
@@ -256,7 +256,7 @@ def make_touch_provider(args: argparse.Namespace):
     return KeyboardMockProvider()
 
 
-def make_tracker(args: argparse.Namespace, search_region: Rect | None = None):
+def make_tracker(args: argparse.Namespace, search_region: Quad | None = None):
     """Picks the position-tracking driver: `OpticalColorTracker` if
     `--tracker=optical-color` was given, else the v1 mouse fallback. Mirrors
     `make_touch_provider`'s `--ble-address` selection pattern above.

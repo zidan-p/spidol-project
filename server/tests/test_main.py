@@ -18,7 +18,7 @@ from hal.providers import BleTouchProvider, KeyboardMockProvider, WifiTouchProvi
 from hal.trackers import OpticalColorTracker, SystemMouseFallbackTracker
 from vision.debug_preview import DebugPreviewTracker
 from vision.homography import HomographyCalibrator
-from vision.region_selector import Rect
+from vision.region_selector import Point, Quad
 from vision.tracking_loss import TrackingLossBridge
 
 
@@ -153,8 +153,12 @@ def test_parse_args_recognizes_adjust_tracking_region_flag():
     assert args.adjust_tracking_region is True
 
 
+def _sample_region() -> Quad:
+    return Quad(points=(Point(10, 20), Point(110, 20), Point(110, 170), Point(10, 170)))
+
+
 def test_make_tracker_applies_search_region_to_optical_color_tracker():
-    region = Rect(x=10, y=20, width=100, height=150)
+    region = _sample_region()
     args = parse_args(["--tracker", "optical-color"])
 
     tracker = make_tracker(args, search_region=region)
@@ -164,7 +168,7 @@ def test_make_tracker_applies_search_region_to_optical_color_tracker():
 
 
 def test_make_tracker_applies_search_region_even_when_wrapped_in_debug_preview():
-    region = Rect(x=10, y=20, width=100, height=150)
+    region = _sample_region()
     args = parse_args(["--tracker", "optical-color", "--debug-camera"])
 
     tracker = make_tracker(args, search_region=region)
@@ -174,7 +178,7 @@ def test_make_tracker_applies_search_region_even_when_wrapped_in_debug_preview()
 
 
 def test_make_tracker_ignores_search_region_in_mouse_mode():
-    region = Rect(x=10, y=20, width=100, height=150)
+    region = _sample_region()
     args = parse_args([])
 
     tracker = make_tracker(args, search_region=region)

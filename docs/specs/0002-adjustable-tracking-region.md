@@ -2,6 +2,8 @@
 
 **Status:** ready-for-agent (manually applied — no issue tracker configured in this session; see note at bottom)
 
+**Amendment (2026-10-14):** the originally-shipped axis-aligned rectangle was upgraded to a general 4-corner quadrilateral (`vision/region_selector.py`'s `Quad`, replacing `Rect`), at the user's explicit request, so the tracked area can match the whiteboard's actual trapezoidal shape in frame when the camera is off to one side rather than straight-on. This reverses this spec's original "non-rectangular region shapes" Out of Scope bullet below; everything else in this document (one-shot setup flow, no persistence, independence from `--debug-camera`, etc.) is unchanged. Still explicitly *not* perspective-correcting the *reported coordinates* — see the still-standing homography Out of Scope bullet.
+
 ## Problem Statement
 
 `OpticalColorTracker` always searches the *entire* camera frame for the blue Pen Tip. In practice the camera sees more than just the whiteboard — other blue objects in the room (clothing, furniture, equipment) can produce false-positive detections that hijack the reported Pen Tip position. There's also no way today to tell the system which part of the frame actually corresponds to the whiteboard, and the right answer changes between venues/sessions since the camera's position, angle, and even the physical device attached (a laptop webcam during dev, a different USB webcam or RemoteCam-exposed phone in production) aren't fixed.
@@ -57,7 +59,8 @@ Good tests here assert on externally observable behavior — what `OpticalColorT
 - Live/mid-session re-adjustment while people are actively drawing — this is a setup-time-only action.
 - Any network/IP-camera capture mechanism beyond the existing device-index-based `cv2.VideoCapture` (RemoteCam, USB webcams) — "another camera in production" means only a different `--camera-index`/device, already supported today.
 - A browser-based version of this UI — this stays a native OpenCV window used by the operator at the physical rig.
-- Multiple simultaneous tracked regions, or non-rectangular region shapes.
+- Multiple simultaneous tracked regions.
+- ~~Non-rectangular region shapes~~ -- reversed by the 2026-10-14 amendment above; the region is now a general quadrilateral.
 
 ## Further Notes
 

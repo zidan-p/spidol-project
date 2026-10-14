@@ -1,147 +1,160 @@
-"""Tests for `RegionSelector` (docs/specs/0002-adjustable-tracking-region.md,
-ticket 2): the pure, cv2-free state machine behind the Adjustable Tracking
-Region setup flow (`--adjust-tracking-region`). Tracks a provisional
-rectangle through raw mouse-down/move/up events, and resolves it into a
-final selection on `confirm()`/`discard()`.
+"""Tests for `RegionSelector` (docs/specs/0002-adjustable-tracking-region.md):
+the pure, cv2-free state machine behind the Adjustable Tracking Region setup
+flow (`--adjust-tracking-region`). Drives four independently-draggable
+corner handles (not just an axis-aligned rectangle), so the tracked area
+can match a trapezoidal board shape seen from an angled camera.
 
 Deliberately has no `cv2` dependency -- the real OpenCV window (mouse
 callback wiring, live frame drawing, translating `cv2.waitKey()` codes into
 `confirm()`/`discard()` calls) is a separate, untested real-I/O wrapper
-around this class (ticket 3), mirroring the existing `DebugPreviewTracker`
-(injectable `show_frame`) / `BleTouchProvider` (injectable `client_factory`)
-pattern of a tested pure core plus an untested thin real-I/O shell.
+around this class (`vision/region_picker.py`), mirroring the existing
+`DebugPreviewTracker` (injectable `show_frame`) / `BleTouchProvider`
+(injectable `client_factory`) pattern of a tested pure core plus an
+untested thin real-I/O shell.
 """
-from vision.region_selector import Point, Rect, RegionSelector
+from vision.region_selector import Point, Quad, RegionSelector
 
 
-def test_starts_with_no_provisional_or_confirmed_selection():
-    selector = RegionSelector()
+def test_starts_with_corners_at_the_full_frame_and_no_confirmed_selection():
+    selector = RegionSelector(frame_size=(100, 50))
 
-    assert selector.provisional is None
+    assert selector.points == (
+        Point(0, 0),
+        Point(99, 0),
+        Point(99, 49),
+        Point(0, 49),
+    )
     assert selector.confirmed is None
 
 
-def test_mouse_down_starts_a_zero_size_provisional_rect_at_that_point():
-    selector = RegionSelector()
+def test_mouse_down_near_a_corner_grabs_and_moves_it():
+    selector = RegionSelector(frame_size=(100, 50))
 
-    selector.on_mouse_down(Point(10, 20))
+    selector.on_mouse_down(Point(5, 5))  # close to the top-left corner (0,0)
 
-    assert selector.provisional == Rect(x=10, y=20, width=0, height=0)
-
-
-def test_mouse_move_while_dragging_grows_the_provisional_rect_toward_the_cursor():
-    selector = RegionSelector()
-
-    selector.on_mouse_down(Point(10, 20))
-    selector.on_mouse_move(Point(50, 80))
-
-    assert selector.provisional == Rect(x=10, y=20, width=40, height=60)
+    assert selector.points[0] == Point(5, 5)
+    # The other three corners are untouched.
+    assert selector.points[1] == Point(99, 0)
+    assert selector.points[2] == Point(99, 49)
+    assert selector.points[3] == Point(0, 49)
 
 
-def test_mouse_move_normalizes_a_drag_in_any_direction_to_a_non_negative_rect():
-    # Dragging from bottom-right back up to top-left should still produce a
-    # valid rect anchored at the min corner, not a negative width/height.
-    selector = RegionSelector()
+def test_mouse_down_far_from_every_corner_grabs_nothing():
+    selector = RegionSelector(frame_size=(100, 50))
 
-    selector.on_mouse_down(Point(100, 100))
-    selector.on_mouse_move(Point(40, 30))
+    selector.on_mouse_down(Point(50, 25))  # dead center, far from all 4 corners
 
-    assert selector.provisional == Rect(x=40, y=30, width=60, height=70)
-
-
-def test_mouse_move_before_any_mouse_down_is_a_no_op():
-    selector = RegionSelector()
-
-    selector.on_mouse_move(Point(50, 50))
-
-    assert selector.provisional is None
+    assert selector.points == (
+        Point(0, 0),
+        Point(99, 0),
+        Point(99, 49),
+        Point(0, 49),
+    )
 
 
-def test_mouse_up_finalizes_the_provisional_rect_at_the_release_point():
-    selector = RegionSelector()
+def test_mouse_move_follows_the_grabbed_corner():
+    selector = RegionSelector(frame_size=(100, 50))
 
-    selector.on_mouse_down(Point(0, 0))
-    selector.on_mouse_move(Point(20, 20))
-    selector.on_mouse_up(Point(30, 30))
+    selector.on_mouse_down(Point(2, 2))  # grabs top-left
+    selector.on_mouse_move(Point(20, 15))
 
-    assert selector.provisional == Rect(x=0, y=0, width=30, height=30)
-
-
-def test_mouse_move_after_mouse_up_without_a_new_mouse_down_is_a_no_op():
-    selector = RegionSelector()
-
-    selector.on_mouse_down(Point(0, 0))
-    selector.on_mouse_up(Point(30, 30))
-    selector.on_mouse_move(Point(999, 999))
-
-    assert selector.provisional == Rect(x=0, y=0, width=30, height=30)
+    assert selector.points[0] == Point(20, 15)
 
 
-def test_confirm_locks_in_the_provisional_rect_as_the_final_selection():
-    selector = RegionSelector()
+def test_mouse_move_without_a_grabbed_corner_is_a_no_op():
+    selector = RegionSelector(frame_size=(100, 50))
 
-    selector.on_mouse_down(Point(0, 0))
-    selector.on_mouse_up(Point(40, 50))
-    selector.confirm()
+    selector.on_mouse_move(Point(20, 15))
 
-    assert selector.confirmed == Rect(x=0, y=0, width=40, height=50)
+    assert selector.points[0] == Point(0, 0)
 
 
-def test_confirm_with_no_provisional_rect_is_a_no_op():
-    # Matches the "confirm without touching anything -> full camera frame"
-    # story: ticket 3's real-I/O wrapper treats `confirmed is None` after
-    # the setup loop ends as "use the full-frame default."
-    selector = RegionSelector()
+def test_mouse_up_releases_the_corner_so_further_moves_do_not_affect_it():
+    selector = RegionSelector(frame_size=(100, 50))
 
-    selector.confirm()
+    selector.on_mouse_down(Point(2, 2))
+    selector.on_mouse_up(Point(20, 15))
+    selector.on_mouse_move(Point(60, 40))
 
-    assert selector.confirmed is None
+    assert selector.points[0] == Point(20, 15)
 
 
-def test_confirm_refuses_a_degenerate_zero_area_rect():
-    # A plain click with no drag at all shouldn't be confirmable as a real
-    # selection -- same fallback-to-default behavior as never confirming.
-    selector = RegionSelector()
+def test_dragging_a_different_corner_does_not_affect_others():
+    selector = RegionSelector(frame_size=(100, 50))
 
-    selector.on_mouse_down(Point(10, 10))
+    selector.on_mouse_down(Point(97, 2))  # near top-right (99, 0)
+    selector.on_mouse_move(Point(80, 10))
+    selector.on_mouse_up(Point(80, 10))
+
+    assert selector.points == (
+        Point(0, 0),
+        Point(80, 10),
+        Point(99, 49),
+        Point(0, 49),
+    )
+
+
+def test_confirm_locks_in_the_current_four_corners():
+    selector = RegionSelector(frame_size=(100, 50))
+
+    selector.on_mouse_down(Point(2, 2))
     selector.on_mouse_up(Point(10, 10))
     selector.confirm()
 
+    assert selector.confirmed == Quad(
+        points=(Point(10, 10), Point(99, 0), Point(99, 49), Point(0, 49))
+    )
+
+
+def test_confirm_without_touching_anything_still_confirms_the_full_frame():
+    # Matches the "confirm without touching anything -> full camera frame"
+    # story: the default quad already covers the full frame.
+    selector = RegionSelector(frame_size=(100, 50))
+
+    selector.confirm()
+
+    assert selector.confirmed == Quad(
+        points=(Point(0, 0), Point(99, 0), Point(99, 49), Point(0, 49))
+    )
+
+
+def test_confirm_refuses_a_degenerate_near_zero_area_quad():
+    selector = RegionSelector(frame_size=(100, 50))
+
+    # Collapse all four corners onto roughly the same point.
+    for i, point in enumerate([Point(50, 25), Point(51, 25), Point(51, 26), Point(50, 26)]):
+        # Grab each corner in turn by starting a drag near its current spot.
+        selector.on_mouse_down(selector.points[i])
+        selector.on_mouse_up(point)
+
+    selector.confirm()
+
     assert selector.confirmed is None
 
 
-def test_discard_clears_the_provisional_rect_so_the_operator_can_redraw():
-    selector = RegionSelector()
+def test_discard_resets_all_four_corners_to_the_full_frame_default():
+    selector = RegionSelector(frame_size=(100, 50))
 
-    selector.on_mouse_down(Point(0, 0))
-    selector.on_mouse_up(Point(40, 50))
+    selector.on_mouse_down(Point(2, 2))
+    selector.on_mouse_up(Point(40, 30))
     selector.discard()
 
-    assert selector.provisional is None
-    assert selector.confirmed is None
+    assert selector.points == (
+        Point(0, 0),
+        Point(99, 0),
+        Point(99, 49),
+        Point(0, 49),
+    )
 
 
 def test_discard_does_not_clear_an_already_confirmed_selection():
-    # discard() is about abandoning an in-progress/unconfirmed drag, not
-    # un-confirming a prior confirm() -- a separate concern it isn't asked
-    # to touch.
-    selector = RegionSelector()
+    selector = RegionSelector(frame_size=(100, 50))
 
-    selector.on_mouse_down(Point(0, 0))
-    selector.on_mouse_up(Point(40, 50))
+    selector.on_mouse_down(Point(2, 2))
+    selector.on_mouse_up(Point(10, 10))
     selector.confirm()
+    confirmed_before = selector.confirmed
+
     selector.discard()
 
-    assert selector.confirmed == Rect(x=0, y=0, width=40, height=50)
-
-
-def test_a_new_mouse_down_starts_a_fresh_drag_regardless_of_prior_state():
-    selector = RegionSelector()
-
-    selector.on_mouse_down(Point(0, 0))
-    selector.on_mouse_up(Point(40, 50))
-    selector.confirm()
-
-    selector.on_mouse_down(Point(5, 5))
-
-    assert selector.provisional == Rect(x=5, y=5, width=0, height=0)
+    assert selector.confirmed == confirmed_before

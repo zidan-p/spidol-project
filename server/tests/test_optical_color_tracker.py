@@ -10,10 +10,23 @@ import pytest
 
 from hal.interfaces import BasePositionTracker
 from hal.trackers import OpticalColorTracker
-from vision.region_selector import Rect
+from vision.region_selector import Point, Quad
 
 FRAME_WIDTH = 640
 FRAME_HEIGHT = 480
+
+
+def rect_quad(x, y, width, height) -> Quad:
+    """An axis-aligned rectangle expressed as a Quad, for tests that don't
+    care about non-rectangular shapes specifically."""
+    return Quad(
+        points=(
+            Point(x, y),
+            Point(x + width, y),
+            Point(x + width, y + height),
+            Point(x, y + height),
+        )
+    )
 
 # Pure blue in BGR -> HSV hue ~120, squarely inside the tracker's default
 # blue Pen Tip color range.
@@ -94,13 +107,15 @@ def test_optical_color_tracker_accepts_custom_hsv_range_for_different_pen_tip_co
     assert y == pytest.approx(150 / FRAME_HEIGHT, abs=0.01)
 
 
-# Adjustable Tracking Region (docs/specs/0002-adjustable-tracking-region.md,
-# ticket 1): restricting the color/contour search to a configured sub-region
-# of the frame, so a stray blob elsewhere in the room is never detected.
+# Adjustable Tracking Region (docs/specs/0002-adjustable-tracking-region.md):
+# restricting the color/contour search to a configured quadrilateral region
+# of the frame, so a stray blob elsewhere in the room is never detected --
+# and so an arbitrary (non-rectangular) shape can match a trapezoidal board
+# as seen from an angled camera.
 
 
 def test_optical_color_tracker_detects_blob_inside_configured_region():
-    region = Rect(x=50, y=50, width=200, height=200)
+    region = rect_quad(50, 50, 200, 200)
     tracker = OpticalColorTracker(search_region=region)
     px, py = 100, 100  # inside the region
     frame = make_frame_with_blob((px, py))
@@ -113,7 +128,7 @@ def test_optical_color_tracker_detects_blob_inside_configured_region():
 
 
 def test_optical_color_tracker_ignores_blob_outside_configured_region():
-    region = Rect(x=50, y=50, width=100, height=100)  # covers x:50-150, y:50-150
+    region = rect_quad(50, 50, 100, 100)  # covers x:50-150, y:50-150
     tracker = OpticalColorTracker(search_region=region)
     frame = make_frame_with_blob((500, 400))  # well outside the region
 
@@ -122,11 +137,38 @@ def test_optical_color_tracker_ignores_blob_outside_configured_region():
     assert is_detected is False
 
 
+def test_optical_color_tracker_detects_blob_inside_a_non_rectangular_quad():
+    # A trapezoid (narrower at the top), the shape a straight-edged board
+    # takes in frame when the camera is off to one side rather than
+    # straight-on -- not expressible as an axis-aligned rectangle at all.
+    region = Quad(points=(Point(200, 50), Point(400, 50), Point(500, 400), Point(100, 400)))
+    tracker = OpticalColorTracker(search_region=region)
+    frame = make_frame_with_blob((300, 300))  # inside the trapezoid
+
+    x, y, is_detected = tracker.get_position(frame)
+
+    assert is_detected is True
+
+
+def test_optical_color_tracker_ignores_blob_outside_a_non_rectangular_quad():
+    # Same trapezoid as above -- a point that would be inside its enclosing
+    # bounding box, but outside the trapezoid itself (its narrow top).
+    region = Quad(points=(Point(200, 50), Point(400, 50), Point(500, 400), Point(100, 400)))
+    tracker = OpticalColorTracker(search_region=region)
+    frame = make_frame_with_blob((120, 60))  # inside the bbox, outside the trapezoid
+
+    x, y, is_detected = tracker.get_position(frame)
+
+    assert is_detected is False
+
+
 def test_optical_color_tracker_reports_full_frame_normalized_position_even_when_restricted_to_a_region():
-    # The reported x/y must stay normalized against the FULL frame, not the
-    # cropped sub-region -- otherwise downstream consumers (homography,
-    # canvas mapping) would see a position silently shifted/scaled.
-    region = Rect(x=200, y=150, width=300, height=250)
+    # The reported x/y must stay normalized against the FULL frame, not
+    # shifted/scaled relative to the region -- a polygon mask (rather than
+    # cropping) means this is inherently always full-frame now, but worth
+    # pinning explicitly since downstream consumers (homography, canvas
+    # mapping) depend on it.
+    region = rect_quad(200, 150, 300, 250)
     tracker = OpticalColorTracker(search_region=region)
     px, py = 350, 300  # inside the region, far from the region's own origin
     frame = make_frame_with_blob((px, py))
@@ -145,13 +187,13 @@ def test_optical_color_tracker_set_search_region_restricts_search_after_construc
     _, _, is_detected_before = tracker.get_position(frame)
     assert is_detected_before is True
 
-    tracker.set_search_region(Rect(x=0, y=0, width=100, height=100))
+    tracker.set_search_region(rect_quad(0, 0, 100, 100))
     _, _, is_detected_after = tracker.get_position(frame)
     assert is_detected_after is False
 
 
 def test_optical_color_tracker_set_search_region_none_restores_full_frame_search():
-    tracker = OpticalColorTracker(search_region=Rect(x=0, y=0, width=100, height=100))
+    tracker = OpticalColorTracker(search_region=rect_quad(0, 0, 100, 100))
     frame = make_frame_with_blob((500, 400))
 
     tracker.set_search_region(None)
@@ -164,13 +206,13 @@ def test_optical_color_tracker_search_region_property_reflects_constructor_and_s
     tracker = OpticalColorTracker()
     assert tracker.search_region is None
 
-    region = Rect(x=1, y=2, width=3, height=4)
+    region = rect_quad(1, 2, 3, 4)
     tracker.set_search_region(region)
     assert tracker.search_region == region
 
 
 def test_optical_color_tracker_handles_a_region_entirely_outside_the_frame_without_crashing():
-    tracker = OpticalColorTracker(search_region=Rect(x=10000, y=10000, width=50, height=50))
+    tracker = OpticalColorTracker(search_region=rect_quad(10000, 10000, 50, 50))
     frame = make_frame_with_blob((100, 100))
 
     x, y, is_detected = tracker.get_position(frame)

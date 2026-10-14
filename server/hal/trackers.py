@@ -10,7 +10,7 @@ import cv2
 import numpy as np
 
 from hal.interfaces import BasePositionTracker
-from vision.region_selector import Rect
+from vision.region_selector import Quad
 
 
 def _default_position_source() -> tuple[int, int]:
@@ -84,14 +84,17 @@ class OpticalColorTracker(BasePositionTracker):
     space -- mapping that into canvas space for an angled camera is the
     homography module's job (`vision/homography.py`), not this class's.
 
-    `search_region` (docs/specs/0002-adjustable-tracking-region.md)
-    restricts the color/contour search to a sub-rectangle of the frame, so
-    a stray blob elsewhere in the room is never detected at all -- unset
-    (the default), the entire frame is searched, unchanged from before this
-    feature existed. Independent of, and untouched by, `vision/homography.py`'s
-    Calibration Hotkey: restricting *where this class searches* and
-    dewarping *detected coordinates* are separate, non-interacting
-    concerns that happen to both involve a camera-frame overlay.
+    `search_region` (docs/specs/0002-adjustable-tracking-region.md) is an
+    arbitrary quadrilateral (not just an axis-aligned box) restricting the
+    color/contour search to inside it, so a stray blob elsewhere in the
+    room is never detected at all -- and so the tracked area can match a
+    trapezoidal board shape when the camera is off to one side rather than
+    straight-on. Unset (the default), the entire frame is searched,
+    unchanged from before this feature existed. Independent of, and
+    untouched by, `vision/homography.py`'s Calibration Hotkey: restricting
+    *where this class searches* and dewarping *detected coordinates* are
+    separate, non-interacting concerns that happen to both involve a
+    camera-frame overlay.
     """
 
     # OpenCV hue is 0-179 (not 0-359): blue sits around hue 120, so this
@@ -104,41 +107,55 @@ class OpticalColorTracker(BasePositionTracker):
         hsv_lower: tuple[int, int, int] | None = None,
         hsv_upper: tuple[int, int, int] | None = None,
         min_contour_area: float = 20.0,
-        search_region: Rect | None = None,
+        search_region: Quad | None = None,
     ):
         self._hsv_lower = np.array(hsv_lower or self.DEFAULT_HSV_LOWER, dtype=np.uint8)
         self._hsv_upper = np.array(hsv_upper or self.DEFAULT_HSV_UPPER, dtype=np.uint8)
         self._min_contour_area = min_contour_area
         self._search_region = search_region
+        self._region_mask: np.ndarray | None = None
+        self._region_mask_shape: tuple[int, int] | None = None
 
-    def set_search_region(self, region: Rect | None) -> None:
+    def set_search_region(self, region: Quad | None) -> None:
         """Applied by `main.py`'s `--adjust-tracking-region` setup flow
         once the operator confirms a selection (or leaves it `None` to
         search the full frame, the pre-this-feature default).
         """
         self._search_region = region
+        self._region_mask = None
+        self._region_mask_shape = None
 
     @property
-    def search_region(self) -> Rect | None:
+    def search_region(self) -> Quad | None:
         return self._search_region
+
+    def _get_region_mask(self, height: int, width: int) -> np.ndarray:
+        # Built once per (region, frame shape) and cached -- cv2.fillPoly
+        # isn't free, and the frame shape/region rarely change tick to tick.
+        if self._region_mask is not None and self._region_mask_shape == (height, width):
+            return self._region_mask
+        polygon = np.array([[p.x, p.y] for p in self._search_region.points], dtype=np.int32)
+        mask = np.zeros((height, width), dtype=np.uint8)
+        cv2.fillPoly(mask, [polygon], 255)
+        self._region_mask = mask
+        self._region_mask_shape = (height, width)
+        return mask
 
     def get_position(self, frame: np.ndarray | None) -> tuple[float, float, bool]:
         if frame is None or frame.size == 0:
             return 0.0, 0.0, False
 
         height, width = frame.shape[:2]
-        search_frame = frame
-        offset_x, offset_y = 0, 0
+        hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
+        mask = cv2.inRange(hsv, self._hsv_lower, self._hsv_upper)
 
         if self._search_region is not None:
-            region = self._search_region
-            search_frame = frame[region.y : region.y + region.height, region.x : region.x + region.width]
-            if search_frame.size == 0:
-                return 0.0, 0.0, False
-            offset_x, offset_y = region.x, region.y
+            # A polygon mask (rather than cropping to an enclosing
+            # rectangle) so an arbitrary quadrilateral is respected exactly,
+            # and the centroid below is already in full-frame pixel space --
+            # no offset math needed, unlike a crop-based approach.
+            mask = cv2.bitwise_and(mask, self._get_region_mask(height, width))
 
-        hsv = cv2.cvtColor(search_frame, cv2.COLOR_BGR2HSV)
-        mask = cv2.inRange(hsv, self._hsv_lower, self._hsv_upper)
         contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
 
         if not contours:
@@ -152,12 +169,8 @@ class OpticalColorTracker(BasePositionTracker):
         if moments["m00"] == 0:
             return 0.0, 0.0, False
 
-        # Offset back into full-frame pixel space before normalizing --
-        # otherwise a restricted search would report a position silently
-        # shifted/scaled relative to the sub-region instead of the frame
-        # every downstream consumer (homography, canvas mapping) expects.
-        centroid_x = moments["m10"] / moments["m00"] + offset_x
-        centroid_y = moments["m01"] / moments["m00"] + offset_y
+        centroid_x = moments["m10"] / moments["m00"]
+        centroid_y = moments["m01"] / moments["m00"]
 
         x = _clamp(centroid_x / width, 0.0, 1.0)
         y = _clamp(centroid_y / height, 0.0, 1.0)
