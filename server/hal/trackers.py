@@ -77,17 +77,19 @@ class OpticalColorTracker(BasePositionTracker):
     shipping in v1 (`ArucoMarkerTracker` is out of scope). It thresholds the
     frame to a configurable HSV range, finds the largest matching contour,
     and reports its centroid as the Pen Tip position. The default range is
-    tuned for a bright red tip; pass `hsv_lower`/`hsv_upper` for a
-    different Pen Tip color.
+    tuned for the actual physical Pen Tip (a teal/cyan-blue 3D-printed
+    marker) -- measured directly from a real photo of it (hue ~90-120,
+    median ~100; this reads as "blue" to the eye but sits closer to cyan
+    than pure blue's hue ~120 in OpenCV's 0-179 scale), not a generic "blue"
+    guess. Pass `hsv_lower`/`hsv_upper` for a different Pen Tip color.
 
-    Red is a special case in OpenCV's 0-179 hue space: it sits at the very
-    ends of the range (wraps around from ~170-179 back to 0-10), so a
-    single contiguous `cv2.inRange` band can't express it the way a single
-    band works fine for blue/green/etc. `hsv_lower2`/`hsv_upper2` (also
-    optional, defaulting to the second half of red's range when the
-    *first* pair is left at its own default) is OR'd in alongside the
-    first band specifically to cover that wrap-around -- unused for any
-    non-wrapping custom color, where only the first band applies.
+    `hsv_lower2`/`hsv_upper2` (optional, unused by default) let a caller
+    supply a *second* HSV band, OR'd in alongside the first -- needed for a
+    color like red, which sits at the very ends of OpenCV's hue space and
+    wraps around (e.g. ~170-179 back to 0-10), so a single contiguous
+    `cv2.inRange` band can't express it the way one band works fine for
+    blue/green/the current default. Never auto-applied; only takes effect
+    if explicitly passed, alongside a matching custom `hsv_lower`/`hsv_upper`.
 
     Coordinates returned are normalized to the camera frame's own [0, 1]
     space -- mapping that into canvas space for an angled camera is the
@@ -106,13 +108,16 @@ class OpticalColorTracker(BasePositionTracker):
     camera-frame overlay.
     """
 
-    # OpenCV hue is 0-179 (not 0-359): pure red sits at hue 0, but real red
-    # objects can land anywhere from hue ~0-10 up through ~170-179 (the
-    # wrap-around), hence the two bands below rather than one.
-    DEFAULT_HSV_LOWER = (0, 80, 80)
-    DEFAULT_HSV_UPPER = (10, 255, 255)
-    DEFAULT_HSV_LOWER2 = (170, 80, 80)
-    DEFAULT_HSV_UPPER2 = (179, 255, 255)
+    # Measured from a real photo of the physical Pen Tip (teal/cyan-blue 3D-
+    # printed marker): sampling its body gave hue 90-115 (5th-95th
+    # percentile 95-100), saturation 50-225 (5th-95th 122-206), value
+    # 55-109 (5th-95th 60-91) under dim indoor lighting. Widened a bit
+    # beyond that sample for lighting variation across sessions, while
+    # staying tight enough to exclude background: validated against the
+    # full photo (not just the sampled patch) to confirm one single clean
+    # contour, no stray noise elsewhere in frame.
+    DEFAULT_HSV_LOWER = (90, 80, 40)
+    DEFAULT_HSV_UPPER = (120, 255, 255)
 
     def __init__(
         self,
@@ -123,16 +128,12 @@ class OpticalColorTracker(BasePositionTracker):
         min_contour_area: float = 20.0,
         search_region: Quad | None = None,
     ):
-        using_default_color = hsv_lower is None and hsv_upper is None
         self._hsv_lower = np.array(hsv_lower or self.DEFAULT_HSV_LOWER, dtype=np.uint8)
         self._hsv_upper = np.array(hsv_upper or self.DEFAULT_HSV_UPPER, dtype=np.uint8)
 
         if hsv_lower2 is not None and hsv_upper2 is not None:
             self._hsv_lower2 = np.array(hsv_lower2, dtype=np.uint8)
             self._hsv_upper2 = np.array(hsv_upper2, dtype=np.uint8)
-        elif using_default_color:
-            self._hsv_lower2 = np.array(self.DEFAULT_HSV_LOWER2, dtype=np.uint8)
-            self._hsv_upper2 = np.array(self.DEFAULT_HSV_UPPER2, dtype=np.uint8)
         else:
             self._hsv_lower2 = None
             self._hsv_upper2 = None

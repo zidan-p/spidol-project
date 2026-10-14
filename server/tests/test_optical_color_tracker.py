@@ -28,9 +28,10 @@ def rect_quad(x, y, width, height) -> Quad:
         )
     )
 
-# Pure red in BGR -> HSV hue 0, squarely inside the tracker's default
-# red Pen Tip color range (the first of its two wrap-around bands).
-PEN_TIP_BGR = (0, 0, 255)
+# hue=100, sat=200, val=150 in BGR -- squarely inside the tracker's
+# default teal/cyan-blue Pen Tip color range (measured from a real photo
+# of the physical marker, see DEFAULT_HSV_LOWER/UPPER's comment).
+PEN_TIP_BGR = (150, 111, 32)
 
 
 def make_frame_with_blob(center_xy, radius=15, color=PEN_TIP_BGR):
@@ -85,20 +86,40 @@ def test_optical_color_tracker_reports_not_detected_for_none_frame():
 
 
 def test_optical_color_tracker_ignores_colors_outside_configured_range():
-    # A green blob should not trigger the default red-tuned tracker.
+    # A pure red blob (hue 0) should not trigger the default teal/blue-tuned
+    # tracker (hue 90-120).
     tracker = OpticalColorTracker()
-    frame = make_frame_with_blob((FRAME_WIDTH // 2, FRAME_HEIGHT // 2), color=(0, 255, 0))
+    frame = make_frame_with_blob((FRAME_WIDTH // 2, FRAME_HEIGHT // 2), color=(0, 0, 255))
 
     x, y, is_detected = tracker.get_position(frame)
 
     assert is_detected is False
 
 
-def test_optical_color_tracker_detects_red_across_its_hue_wrap_around_second_band():
-    # Deep/magenta-ish red (hue near 179, the "other side" of red's wrap)
-    # should still be detected via the second default band, not just the
-    # hue-0 band pure red falls into.
+def test_optical_color_tracker_second_hsv_band_is_unused_by_default():
+    # The default color (teal/cyan-blue) doesn't wrap around hue 0/179, so
+    # nothing should be auto-applied for hsv_lower2/upper2 -- a color that
+    # would only match a red-style wrap-around band (hue near 179) must
+    # stay undetected unless that second band is explicitly configured.
     tracker = OpticalColorTracker()
+    hsv_wraparound_red = np.uint8([[[175, 200, 200]]])
+    bgr = cv2.cvtColor(hsv_wraparound_red, cv2.COLOR_HSV2BGR)[0, 0].tolist()
+    frame = make_frame_with_blob((FRAME_WIDTH // 2, FRAME_HEIGHT // 2), color=bgr)
+
+    x, y, is_detected = tracker.get_position(frame)
+
+    assert is_detected is False
+
+
+def test_optical_color_tracker_accepts_an_explicit_second_hsv_band_for_wrap_around_colors():
+    # A caller can opt into a second band explicitly -- e.g. to support a
+    # red marker, which needs both ends of OpenCV's hue space.
+    tracker = OpticalColorTracker(
+        hsv_lower=(0, 80, 80),
+        hsv_upper=(10, 255, 255),
+        hsv_lower2=(170, 80, 80),
+        hsv_upper2=(179, 255, 255),
+    )
     hsv_wraparound_red = np.uint8([[[175, 200, 200]]])
     bgr = cv2.cvtColor(hsv_wraparound_red, cv2.COLOR_HSV2BGR)[0, 0].tolist()
     frame = make_frame_with_blob((FRAME_WIDTH // 2, FRAME_HEIGHT // 2), color=bgr)
