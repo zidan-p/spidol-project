@@ -39,6 +39,12 @@ function appendPoint(activeStroke, point) {
     // Text placement is a single click; ignore any drag past the anchor.
     return activeStroke
   }
+  const lastPoint = activeStroke.points[activeStroke.points.length - 1]
+  if (lastPoint && distance(lastPoint, point) < MIN_POINT_DISTANCE) {
+    // Within the jitter dead-zone -- treat as "still at the same point"
+    // rather than appending a near-duplicate.
+    return activeStroke
+  }
   return { ...activeStroke, points: [...activeStroke.points, point] }
 }
 
@@ -48,6 +54,18 @@ function appendPoint(activeStroke, point) {
 // rendering), so scaling one from the other would make the eraser's hit
 // radius depend on the viewer's canvas size.
 const ERASER_HIT_RADIUS = 0.035
+
+// Minimum movement (same normalized 0..1 units as stroke points) a new
+// freehand point must be from the stroke's last point to actually get
+// appended. OpticalColorTracker's blob-centroid naturally jitters by a tiny
+// amount even when the hand is genuinely still (paused at a corner) --
+// without this dead-zone, that jitter draws a messy little radiating
+// cluster at every pause instead of a clean point/corner.
+const MIN_POINT_DISTANCE = 0.004
+
+function distance(a, b) {
+  return Math.hypot(a.x - b.x, a.y - b.y)
+}
 
 // The release (pen-up) TRACK_UPDATE's point is only meaningful for shape/
 // text tools, where it supplies the final drag endpoint. For freehand

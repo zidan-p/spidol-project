@@ -111,6 +111,31 @@ describe('ingestTrackUpdate (pen tool)', () => {
     expect(buffer.activeStroke.points).toEqual([{ x: 0.1, y: 0.1 }])
   })
 
+  it('does not append a new point when the hand is essentially stationary (jitter dead-zone)', () => {
+    // OpticalColorTracker's blob-centroid naturally jitters by a tiny
+    // amount even when the hand is genuinely still (paused at a corner),
+    // which previously drew a messy little radiating cluster at every
+    // pause instead of a clean point/corner.
+    let buffer = createStrokeBuffer()
+    buffer = ingestTrackUpdate(buffer, trackUpdate({ x: 0.5, y: 0.5, is_touching: true }), penStyle())
+    buffer = ingestTrackUpdate(buffer, trackUpdate({ x: 0.5001, y: 0.4999, is_touching: true }), penStyle())
+    buffer = ingestTrackUpdate(buffer, trackUpdate({ x: 0.4998, y: 0.5002, is_touching: true }), penStyle())
+
+    expect(buffer.activeStroke.points).toEqual([{ x: 0.5, y: 0.5 }])
+  })
+
+  it('still appends a point once the hand makes a real, deliberate move', () => {
+    let buffer = createStrokeBuffer()
+    buffer = ingestTrackUpdate(buffer, trackUpdate({ x: 0.5, y: 0.5, is_touching: true }), penStyle())
+    buffer = ingestTrackUpdate(buffer, trackUpdate({ x: 0.5001, y: 0.4999, is_touching: true }), penStyle())
+    buffer = ingestTrackUpdate(buffer, trackUpdate({ x: 0.6, y: 0.6, is_touching: true }), penStyle())
+
+    expect(buffer.activeStroke.points).toEqual([
+      { x: 0.5, y: 0.5 },
+      { x: 0.6, y: 0.6 },
+    ])
+  })
+
   it('returns no lastAction on calls that neither start nor close a stroke', () => {
     let buffer = createStrokeBuffer()
     const result = ingestTrackUpdate(buffer, trackUpdate({ is_touching: false }), penStyle())
