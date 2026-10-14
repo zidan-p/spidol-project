@@ -37,7 +37,7 @@ The body button press (GPIO5) that explicitly submits the current region of inte
 _Avoid_: Auto-detect, gesture trigger
 
 **Calibration Hotkey**:
-A manual, operator-triggered action (not automatic drift detection) that re-runs the 4-point homography calibration. Expected to be used once per session/demo run, since the rig may be bumped or re-aimed between runs.
+A manual, operator-triggered action (not automatic drift detection) that re-runs the 4-point homography calibration. Expected to be used once per session/demo run, since the rig may be bumped or re-aimed between runs. Its real point-picking source is now the Adjustable Tracking Region picker (`--adjust-tracking-region`): the same four corners the operator drags out there (`main.py`'s `calibrate_homography_from_region`) double as the homography correspondence, so the dev-mode "C" keyboard shortcut's hardcoded identity corners are only ever a fallback for when no region has been confirmed that session.
 _Avoid_: Auto-calibration, drift correction
 
 **Cached Fallback Schema**:

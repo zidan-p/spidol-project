@@ -398,6 +398,22 @@ def make_os_cursor_controller(args: argparse.Namespace):
     return OsCursorController(screen_size=detect_screen_size())
 
 
+def calibrate_homography_from_region(homography: HomographyCalibrator, region: Quad, frame_size: tuple[int, int]) -> None:
+    """Calibrates `homography` so the confirmed Adjustable Tracking Region's
+    own four corners map onto the full [0, 1] output range -- reaching the
+    region's left edge becomes "all the way left" in canvas/OS-cursor
+    space, not merely partway across the whole camera frame. `frame_size`
+    is `(width, height)` of the frame `region`'s corners were measured
+    against (pixel space), needed to normalize them into the same [0, 1]
+    space `OpticalColorTracker.get_position()` reports in (and
+    `HomographyCalibrator.transform()` therefore expects).
+    """
+    frame_width, frame_height = frame_size
+    src_points = [(p.x / frame_width, p.y / frame_height) for p in region.points]
+    dst_points = [(0.0, 0.0), (1.0, 0.0), (1.0, 1.0), (0.0, 1.0)]
+    homography.calibrate(src_points=src_points, dst_points=dst_points)
+
+
 async def run(args: argparse.Namespace) -> None:
     # Built first (and reused for the picker below, never opened twice) --
     # make_tracker needs the resolved search_region before it constructs
@@ -408,12 +424,23 @@ async def run(args: argparse.Namespace) -> None:
     search_region = None
     if args.tracker == "optical-color" and args.adjust_tracking_region:
         print(
-            "Adjust Tracking Region: drag a rectangle over the live preview, "
-            "Enter/Space to confirm (or accept the full frame), Esc to redraw."
+            "Adjust Tracking Region: drag any of the four corner handles over the "
+            "live preview, Enter/Space to confirm (or accept the full frame), Esc "
+            "to reset all four corners."
         )
         search_region = pick_tracking_region(image_source.capture_frame)
         if search_region is not None:
             logger.info("Tracking region set to %r", search_region)
+            # The same four corners the operator just placed also become the
+            # homography correspondence: the region's own edges now map to
+            # the full [0,1] output range (canvas, and in turn the real
+            # screen for --control-os-cursor), not just the full camera
+            # frame's edges -- so reaching the region's left edge is "all
+            # the way left," not merely "partway across the whole frame."
+            sizing_frame = image_source.capture_frame()
+            frame_height, frame_width = sizing_frame.shape[:2]
+            calibrate_homography_from_region(homography, search_region, frame_size=(frame_width, frame_height))
+            logger.info("Homography calibrated from the tracking region's own corners.")
         else:
             logger.info("No tracking region selected; searching the full camera frame.")
 

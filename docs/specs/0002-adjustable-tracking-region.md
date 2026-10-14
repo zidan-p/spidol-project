@@ -2,7 +2,9 @@
 
 **Status:** ready-for-agent (manually applied — no issue tracker configured in this session; see note at bottom)
 
-**Amendment (2026-10-14):** the originally-shipped axis-aligned rectangle was upgraded to a general 4-corner quadrilateral (`vision/region_selector.py`'s `Quad`, replacing `Rect`), at the user's explicit request, so the tracked area can match the whiteboard's actual trapezoidal shape in frame when the camera is off to one side rather than straight-on. This reverses this spec's original "non-rectangular region shapes" Out of Scope bullet below; everything else in this document (one-shot setup flow, no persistence, independence from `--debug-camera`, etc.) is unchanged. Still explicitly *not* perspective-correcting the *reported coordinates* — see the still-standing homography Out of Scope bullet.
+**Amendment (2026-10-14, part 1):** the originally-shipped axis-aligned rectangle was upgraded to a general 4-corner quadrilateral (`vision/region_selector.py`'s `Quad`, replacing `Rect`), at the user's explicit request, so the tracked area can match the whiteboard's actual trapezoidal shape in frame when the camera is off to one side rather than straight-on. This reverses this spec's original "non-rectangular region shapes" Out of Scope bullet below; everything else in this document (one-shot setup flow, no persistence, independence from `--debug-camera`, etc.) is unchanged.
+
+**Amendment (2026-10-14, part 2):** reverses this spec's homography Out of Scope bullet too. `main.py`'s `calibrate_homography_from_region` now feeds the *same* confirmed quad's four corners into `HomographyCalibrator.calibrate()` (normalized into the same [0,1] space `OpticalColorTracker.get_position()` reports in) as soon as a region is confirmed — so the region's own edges become the full [0,1] output range (e.g. reaching its left edge is "all the way left" for the canvas, and in turn the real screen for `--control-os-cursor`), not just a sub-range of the full camera frame's edges. One quad now serves both purposes (restricting the search *and* defining the output mapping) rather than needing a separate calibration step.
 
 ## Problem Statement
 
@@ -54,7 +56,7 @@ Good tests here assert on externally observable behavior — what `OpticalColorT
 
 ## Out of Scope
 
-- 4-point perspective/homography correction for an angled camera — a separate, already-partially-built feature (`HomographyCalibrator`); untouched by this work.
+- ~~4-point perspective/homography correction for an angled camera~~ — reversed by the 2026-10-14 part 2 amendment above; the confirmed region's own corners now calibrate `HomographyCalibrator` too.
 - Persisting the chosen region to disk/config across server restarts.
 - Live/mid-session re-adjustment while people are actively drawing — this is a setup-time-only action.
 - Any network/IP-camera capture mechanism beyond the existing device-index-based `cv2.VideoCapture` (RemoteCam, USB webcams) — "another camera in production" means only a different `--camera-index`/device, already supported today.

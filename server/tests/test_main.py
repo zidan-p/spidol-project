@@ -2,9 +2,11 @@
 bridge (the ticket 01 stand-in for a real Tip Contact Switch), plus ticket
 05's `--ble-address` flag that switches the touch-signal source over to the
 real Stylus firmware via `BleTouchProvider`."""
+import pytest
 from pynput.mouse import Button
 
 from main import (
+    calibrate_homography_from_region,
     make_camera_resources,
     make_click_handler,
     make_os_cursor_controller,
@@ -184,6 +186,48 @@ def test_make_tracker_ignores_search_region_in_mouse_mode():
     tracker = make_tracker(args, search_region=region)
 
     assert isinstance(tracker, SystemMouseFallbackTracker)
+
+
+def test_calibrate_homography_from_region_maps_the_regions_own_corners_to_the_unit_square():
+    # A 200x100 sub-region, inside a 400x200 frame -- its own corners
+    # (not the full frame's) should map to the canvas's own four corners.
+    region = Quad(points=(Point(100, 50), Point(300, 50), Point(300, 150), Point(100, 150)))
+    homography = HomographyCalibrator()
+
+    calibrate_homography_from_region(homography, region, frame_size=(400, 200))
+
+    assert homography.is_calibrated
+    # Region's top-left corner (100/400, 50/200) = (0.25, 0.25) -> canvas (0, 0).
+    x, y = homography.transform((0.25, 0.25))
+    assert x == pytest.approx(0.0, abs=1e-5)
+    assert y == pytest.approx(0.0, abs=1e-5)
+    # Region's bottom-right corner (300/400, 150/200) = (0.75, 0.75) -> canvas (1, 1).
+    x, y = homography.transform((0.75, 0.75))
+    assert x == pytest.approx(1.0, abs=1e-5)
+    assert y == pytest.approx(1.0, abs=1e-5)
+
+
+def test_calibrate_homography_from_region_maps_the_regions_center_to_the_canvas_center():
+    region = Quad(points=(Point(100, 50), Point(300, 50), Point(300, 150), Point(100, 150)))
+    homography = HomographyCalibrator()
+
+    calibrate_homography_from_region(homography, region, frame_size=(400, 200))
+
+    # Region's own center (200/400, 100/200) = (0.5, 0.5) -> canvas center.
+    x, y = homography.transform((0.5, 0.5))
+    assert x == pytest.approx(0.5, abs=1e-5)
+    assert y == pytest.approx(0.5, abs=1e-5)
+
+
+def test_calibrate_homography_from_region_with_the_full_frame_region_is_near_identity():
+    region = Quad(points=(Point(0, 0), Point(399, 0), Point(399, 199), Point(0, 199)))
+    homography = HomographyCalibrator()
+
+    calibrate_homography_from_region(homography, region, frame_size=(400, 200))
+
+    x, y = homography.transform((0.3, 0.7))
+    assert x == pytest.approx(0.3, abs=0.01)
+    assert y == pytest.approx(0.7, abs=0.01)
 
 
 class _FakeVideoCapture:
