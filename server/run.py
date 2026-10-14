@@ -32,6 +32,7 @@ PRESETS = {
         "--tracker", "optical-color",
         "--debug-camera",
         "--flip-camera",
+        "--control-os-cursor",
         "--wifi-touch-port", WIFI_TOUCH_PORT,
     ],
     "ipwebcam": [
