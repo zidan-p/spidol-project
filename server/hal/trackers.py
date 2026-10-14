@@ -77,8 +77,17 @@ class OpticalColorTracker(BasePositionTracker):
     shipping in v1 (`ArucoMarkerTracker` is out of scope). It thresholds the
     frame to a configurable HSV range, finds the largest matching contour,
     and reports its centroid as the Pen Tip position. The default range is
-    tuned for a bright blue tip; pass `hsv_lower`/`hsv_upper` for a
+    tuned for a bright red tip; pass `hsv_lower`/`hsv_upper` for a
     different Pen Tip color.
+
+    Red is a special case in OpenCV's 0-179 hue space: it sits at the very
+    ends of the range (wraps around from ~170-179 back to 0-10), so a
+    single contiguous `cv2.inRange` band can't express it the way a single
+    band works fine for blue/green/etc. `hsv_lower2`/`hsv_upper2` (also
+    optional, defaulting to the second half of red's range when the
+    *first* pair is left at its own default) is OR'd in alongside the
+    first band specifically to cover that wrap-around -- unused for any
+    non-wrapping custom color, where only the first band applies.
 
     Coordinates returned are normalized to the camera frame's own [0, 1]
     space -- mapping that into canvas space for an angled camera is the
@@ -97,20 +106,37 @@ class OpticalColorTracker(BasePositionTracker):
     camera-frame overlay.
     """
 
-    # OpenCV hue is 0-179 (not 0-359): blue sits around hue 120, so this
-    # range is centered there rather than at green's ~60.
-    DEFAULT_HSV_LOWER = (100, 80, 80)
-    DEFAULT_HSV_UPPER = (130, 255, 255)
+    # OpenCV hue is 0-179 (not 0-359): pure red sits at hue 0, but real red
+    # objects can land anywhere from hue ~0-10 up through ~170-179 (the
+    # wrap-around), hence the two bands below rather than one.
+    DEFAULT_HSV_LOWER = (0, 80, 80)
+    DEFAULT_HSV_UPPER = (10, 255, 255)
+    DEFAULT_HSV_LOWER2 = (170, 80, 80)
+    DEFAULT_HSV_UPPER2 = (179, 255, 255)
 
     def __init__(
         self,
         hsv_lower: tuple[int, int, int] | None = None,
         hsv_upper: tuple[int, int, int] | None = None,
+        hsv_lower2: tuple[int, int, int] | None = None,
+        hsv_upper2: tuple[int, int, int] | None = None,
         min_contour_area: float = 20.0,
         search_region: Quad | None = None,
     ):
+        using_default_color = hsv_lower is None and hsv_upper is None
         self._hsv_lower = np.array(hsv_lower or self.DEFAULT_HSV_LOWER, dtype=np.uint8)
         self._hsv_upper = np.array(hsv_upper or self.DEFAULT_HSV_UPPER, dtype=np.uint8)
+
+        if hsv_lower2 is not None and hsv_upper2 is not None:
+            self._hsv_lower2 = np.array(hsv_lower2, dtype=np.uint8)
+            self._hsv_upper2 = np.array(hsv_upper2, dtype=np.uint8)
+        elif using_default_color:
+            self._hsv_lower2 = np.array(self.DEFAULT_HSV_LOWER2, dtype=np.uint8)
+            self._hsv_upper2 = np.array(self.DEFAULT_HSV_UPPER2, dtype=np.uint8)
+        else:
+            self._hsv_lower2 = None
+            self._hsv_upper2 = None
+
         self._min_contour_area = min_contour_area
         self._search_region = search_region
         self._region_mask: np.ndarray | None = None
@@ -148,6 +174,10 @@ class OpticalColorTracker(BasePositionTracker):
         height, width = frame.shape[:2]
         hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
         mask = cv2.inRange(hsv, self._hsv_lower, self._hsv_upper)
+        if self._hsv_lower2 is not None:
+            # Red's wrap-around second band (see class docstring) -- OR'd
+            # into the first band's mask, not replacing it.
+            mask = cv2.bitwise_or(mask, cv2.inRange(hsv, self._hsv_lower2, self._hsv_upper2))
 
         if self._search_region is not None:
             # A polygon mask (rather than cropping to an enclosing

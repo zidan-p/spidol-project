@@ -28,9 +28,9 @@ def rect_quad(x, y, width, height) -> Quad:
         )
     )
 
-# Pure blue in BGR -> HSV hue ~120, squarely inside the tracker's default
-# blue Pen Tip color range.
-PEN_TIP_BGR = (255, 0, 0)
+# Pure red in BGR -> HSV hue 0, squarely inside the tracker's default
+# red Pen Tip color range (the first of its two wrap-around bands).
+PEN_TIP_BGR = (0, 0, 255)
 
 
 def make_frame_with_blob(center_xy, radius=15, color=PEN_TIP_BGR):
@@ -85,13 +85,27 @@ def test_optical_color_tracker_reports_not_detected_for_none_frame():
 
 
 def test_optical_color_tracker_ignores_colors_outside_configured_range():
-    # A red blob should not trigger the default blue-tuned tracker.
+    # A green blob should not trigger the default red-tuned tracker.
     tracker = OpticalColorTracker()
-    frame = make_frame_with_blob((FRAME_WIDTH // 2, FRAME_HEIGHT // 2), color=(0, 0, 255))
+    frame = make_frame_with_blob((FRAME_WIDTH // 2, FRAME_HEIGHT // 2), color=(0, 255, 0))
 
     x, y, is_detected = tracker.get_position(frame)
 
     assert is_detected is False
+
+
+def test_optical_color_tracker_detects_red_across_its_hue_wrap_around_second_band():
+    # Deep/magenta-ish red (hue near 179, the "other side" of red's wrap)
+    # should still be detected via the second default band, not just the
+    # hue-0 band pure red falls into.
+    tracker = OpticalColorTracker()
+    hsv_wraparound_red = np.uint8([[[175, 200, 200]]])
+    bgr = cv2.cvtColor(hsv_wraparound_red, cv2.COLOR_HSV2BGR)[0, 0].tolist()
+    frame = make_frame_with_blob((FRAME_WIDTH // 2, FRAME_HEIGHT // 2), color=bgr)
+
+    x, y, is_detected = tracker.get_position(frame)
+
+    assert is_detected is True
 
 
 def test_optical_color_tracker_accepts_custom_hsv_range_for_different_pen_tip_colors():
