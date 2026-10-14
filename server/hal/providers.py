@@ -151,26 +151,37 @@ class BleTouchProvider(BaseTouchProvider):
 
 
 class WifiTouchProvider(BaseTouchProvider):
-    """Touch-signal source for the WiFi/TCP firmware variant
-    (spidol/spidol_firmware.ino's `WiFiClient`-based main.cpp): instead of
-    this process connecting out over BLE, the ESP32 connects out to *this*
-    process as a plain TCP client and sends newline-terminated ASCII "1"/"0"
-    lines on each Tip Contact Switch transition (TTP223 touch module -> HIGH
-    = pressed). No AI Trigger notification exists in that firmware today --
-    unlike `BleTouchProvider`, there's no `on_ai_trigger` here.
+    """Touch-signal and AI-Trigger source for the WiFi/TCP firmware variant
+    (spidol/src/main.cpp's `WiFiClient`-based firmware): instead of this
+    process connecting out over BLE, the ESP32 connects out to *this*
+    process as a plain TCP client and sends newline-terminated ASCII lines:
+    "1"/"0" on each Tip Contact Switch transition (touch signal), and
+    "TRIGGER" once per AI Trigger button press (a one-shot action, not an
+    ongoing state -- the firmware sends it once per press, not continuously
+    while held).
 
-    Mirrors `BleTouchProvider`'s shape otherwise: a background
-    `run_forever()` coroutine (intended to run as its own
-    `asyncio.create_task` at server startup) bridging the async socket read
-    loop into the synchronous `is_touching()` seam the 60fps telemetry loop
-    calls every tick.
+    Mirrors `BleTouchProvider`'s shape: a background `run_forever()`
+    coroutine (intended to run as its own `asyncio.create_task` at server
+    startup) bridging the async socket read loop into the synchronous
+    `is_touching()` seam the 60fps telemetry loop calls every tick, plus an
+    injected `on_ai_trigger` callback (sync or async) invoked on each
+    "TRIGGER" line -- same dual-callback-type handling as `BleTouchProvider`.
     """
 
-    def __init__(self, host: str = "0.0.0.0", port: int = 8080):
+    def __init__(self, host: str = "0.0.0.0", port: int = 8080, on_ai_trigger=None):
         self._host = host
         self._port = port
+        self._on_ai_trigger = on_ai_trigger
         self._touching = False
         self._server = None
+
+    def set_on_ai_trigger(self, callback) -> None:
+        """Wires (or re-wires) the AI-trigger callback after construction --
+        same startup-order constraint as `BleTouchProvider.set_on_ai_trigger`:
+        this provider must exist before `server_app.create_server` starts,
+        but `server.fire_ai_trigger` only exists once the server has.
+        """
+        self._on_ai_trigger = callback
 
     def is_touching(self) -> bool:
         return self._touching
@@ -197,6 +208,8 @@ class WifiTouchProvider(BaseTouchProvider):
                     self._touching = True
                 elif value == b"0":
                     self._touching = False
+                elif value == b"TRIGGER":
+                    self._handle_trigger_line()
         except Exception:
             logger.exception("WifiTouchProvider: connection error")
         finally:
@@ -206,3 +219,18 @@ class WifiTouchProvider(BaseTouchProvider):
             # stale "still touching" forever.
             self._touching = False
             writer.close()
+
+    def _handle_trigger_line(self) -> None:
+        if self._on_ai_trigger is None:
+            return
+        try:
+            if asyncio.iscoroutinefunction(self._on_ai_trigger):
+                asyncio.create_task(self._on_ai_trigger())
+            else:
+                self._on_ai_trigger()
+        except Exception:
+            # A notification callback must never raise back into the read
+            # loop -- a crash here would otherwise tear down the TCP
+            # connection (or the whole server) over an AI-trigger-handling
+            # bug, which is strictly worse than just logging and continuing.
+            logger.exception("on_ai_trigger callback raised")

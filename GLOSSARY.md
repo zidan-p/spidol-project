@@ -25,7 +25,7 @@ The frontend's true fullscreen, nothing-else-clickable browser state with the re
 _Avoid_: Blackout mode (that's the visual pitch-black rendering state, a separate concept), fullscreen
 
 **Touch Signal**:
-The press/release state of the Tip Contact Switch, carried from firmware to server as a custom BLE GATT characteristic notification (consumed by `BleTouchProvider`), never as an HID mouse click. Fully decoupled from Pen Tip position, which arrives separately over the camera/WebSocket path. A WiFi/TCP firmware variant (`spidol/src/main.cpp`, `server/hal/providers.py`'s `WifiTouchProvider`) carries the same Touch Signal over a plain TCP connection instead -- the ESP32 connects out to the server and sends newline-terminated "1"/"0" lines on each transition -- but has no AI Trigger notification of its own; still never an HID mouse click either way.
+The press/release state of the Tip Contact Switch, carried from firmware to server as a custom BLE GATT characteristic notification (consumed by `BleTouchProvider`), never as an HID mouse click. Fully decoupled from Pen Tip position, which arrives separately over the camera/WebSocket path. A WiFi/TCP firmware variant (`spidol/src/main.cpp`, `server/hal/providers.py`'s `WifiTouchProvider`) carries the same Touch Signal over a plain TCP connection instead -- the ESP32 connects out to the server and sends newline-terminated "1"/"0" lines on each transition -- and, over that same connection, a "TRIGGER" line once per AI Trigger button press; still never an HID mouse click either way.
 _Avoid_: BLE mouse click, HID click
 
 **AI Trigger**:

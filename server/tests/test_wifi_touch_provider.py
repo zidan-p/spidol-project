@@ -110,6 +110,118 @@ async def test_wifi_touch_provider_resets_to_not_touching_when_stylus_disconnect
 
 
 @pytest.mark.asyncio
+async def test_wifi_touch_provider_invokes_sync_on_ai_trigger_callback_on_trigger_line():
+    port = await _free_port()
+    calls = []
+    provider = WifiTouchProvider(host="127.0.0.1", port=port, on_ai_trigger=lambda: calls.append(1))
+    task = asyncio.create_task(provider.run_forever())
+    await asyncio.sleep(0.05)
+
+    _, writer = await asyncio.open_connection("127.0.0.1", port)
+    try:
+        writer.write(b"TRIGGER\n")
+        await writer.drain()
+        await asyncio.sleep(0.05)
+        assert calls == [1]
+    finally:
+        writer.close()
+        task.cancel()
+        try:
+            await task
+        except asyncio.CancelledError:
+            pass
+
+
+@pytest.mark.asyncio
+async def test_wifi_touch_provider_invokes_async_on_ai_trigger_callback_on_trigger_line():
+    port = await _free_port()
+    calls = []
+
+    async def on_ai_trigger():
+        calls.append(1)
+
+    provider = WifiTouchProvider(host="127.0.0.1", port=port, on_ai_trigger=on_ai_trigger)
+    task = asyncio.create_task(provider.run_forever())
+    await asyncio.sleep(0.05)
+
+    _, writer = await asyncio.open_connection("127.0.0.1", port)
+    try:
+        writer.write(b"TRIGGER\n")
+        await writer.drain()
+        # The callback is scheduled via asyncio.create_task, not awaited
+        # inline by the (sync) line-parsing loop -- let the event loop run it.
+        await asyncio.sleep(0.05)
+        assert calls == [1]
+    finally:
+        writer.close()
+        task.cancel()
+        try:
+            await task
+        except asyncio.CancelledError:
+            pass
+
+
+@pytest.mark.asyncio
+async def test_wifi_touch_provider_trigger_line_does_not_affect_touch_state():
+    port = await _free_port()
+    calls = []
+    provider = WifiTouchProvider(host="127.0.0.1", port=port, on_ai_trigger=lambda: calls.append(1))
+    task = asyncio.create_task(provider.run_forever())
+    await asyncio.sleep(0.05)
+
+    _, writer = await asyncio.open_connection("127.0.0.1", port)
+    try:
+        writer.write(b"TRIGGER\n")
+        await writer.drain()
+        await asyncio.sleep(0.05)
+        assert provider.is_touching() is False
+    finally:
+        writer.close()
+        task.cancel()
+        try:
+            await task
+        except asyncio.CancelledError:
+            pass
+
+
+def test_wifi_touch_provider_with_no_on_ai_trigger_callback_does_not_raise():
+    provider = WifiTouchProvider(on_ai_trigger=None)
+    # Directly exercise the internal handler the same way the read loop
+    # would -- this is the "no callback configured" branch, a legitimate
+    # construction (e.g. a touch-only deployment, no trigger button wired).
+    provider._handle_trigger_line()
+
+
+@pytest.mark.asyncio
+async def test_wifi_touch_provider_set_on_ai_trigger_wires_callback_after_construction():
+    # Mirrors BleTouchProvider's same need: main.py's touch provider must
+    # be constructed before server_app.create_server starts (the telemetry
+    # loop needs it from its first tick), but server.fire_ai_trigger only
+    # exists after the server has started -- so construction happens with
+    # on_ai_trigger=None, and main.py calls this setter once `server` exists.
+    port = await _free_port()
+    calls = []
+    provider = WifiTouchProvider(host="127.0.0.1", port=port, on_ai_trigger=None)
+    provider.set_on_ai_trigger(lambda: calls.append(1))
+    task = asyncio.create_task(provider.run_forever())
+    await asyncio.sleep(0.05)
+
+    _, writer = await asyncio.open_connection("127.0.0.1", port)
+    try:
+        writer.write(b"TRIGGER\n")
+        await writer.drain()
+        await asyncio.sleep(0.05)
+        assert calls == [1]
+    finally:
+        writer.close()
+        task.cancel()
+        try:
+            await task
+        except asyncio.CancelledError:
+            pass
+
+
+@pytest.mark.asyncio
 async def test_wifi_touch_provider_accepts_a_reconnect_after_a_disconnect():
     port = await _free_port()
     provider = WifiTouchProvider(host="127.0.0.1", port=port)

@@ -40,10 +40,12 @@ direct call, not a self-directed WebSocket message. This firmware pairing
 WiFi mode (`--wifi-touch-port <port>`): `make_touch_provider` returns a
 `WifiTouchProvider` instead, which listens for the ESP32's own outgoing TCP
 connection (`spidol/src/main.cpp`'s `WiFiClient`-based firmware) rather than
-this process connecting out, and has no AI Trigger notification -- that
-firmware variant only carries the Touch Signal (newline-terminated "1"/"0"
-lines on each Tip Contact Switch transition). `run()` only starts its
-`run_forever()` background task; there's no `set_on_ai_trigger` call to make.
+this process connecting out. Carries both the Touch Signal (newline-
+terminated "1"/"0" lines on each switch transition) and the AI Trigger (a
+"TRIGGER" line, sent once per button press) over the same connection --
+`run()` wires `set_on_ai_trigger(server.fire_ai_trigger)` the same way as
+the BLE path above, just before starting its `run_forever()` background
+task.
 
 Adjustable Tracking Region (`--adjust-tracking-region`, docs/specs/0002-
 adjustable-tracking-region.md): with `--tracker=optical-color`, `run()` pops
@@ -212,8 +214,8 @@ def make_touch_provider(args: argparse.Namespace):
     `--ble-address` was given, the WiFi/TCP firmware variant if
     `--wifi-touch-port` was given, else the v1 mouse-click stand-in.
     `on_ai_trigger` is deliberately left unset here -- see `run()`, which
-    wires it to `server.fire_ai_trigger` once the server exists (BLE only;
-    the WiFi/TCP firmware variant has no AI Trigger signal today).
+    wires it to `server.fire_ai_trigger` once the server exists, for both
+    the BLE and WiFi/TCP variants.
     """
     if args.ble_address:
         return BleTouchProvider(
@@ -408,6 +410,10 @@ async def run(args: argparse.Namespace) -> None:
             asyncio.create_task(touch_provider.run_forever())
             print(f"Connecting to SPIDOL Stylus at {args.ble_address}...")
         elif isinstance(touch_provider, WifiTouchProvider):
+            # Same direct-call wiring as the BLE path above -- the WiFi/TCP
+            # firmware variant now also sends a "TRIGGER" line (see
+            # hal/providers.py), not just touch signal.
+            touch_provider.set_on_ai_trigger(server.fire_ai_trigger)
             asyncio.create_task(touch_provider.run_forever())
             print(f"Listening for SPIDOL Stylus (WiFi) on TCP port {args.wifi_touch_port}...")
 
