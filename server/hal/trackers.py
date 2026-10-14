@@ -110,14 +110,23 @@ class OpticalColorTracker(BasePositionTracker):
 
     # Measured from a real photo of the physical Pen Tip (teal/cyan-blue 3D-
     # printed marker): sampling its body gave hue 90-115 (5th-95th
-    # percentile 95-100), saturation 50-225 (5th-95th 122-206). The object's
-    # own value (brightness) channel splits close to exactly in half at V=81
-    # (Otsu threshold within just the object's own pixels) between its lit
-    # side and its shadowed underside -- the value lower bound is set just
-    # below that split specifically to exclude the dark/shadowed side,
-    # matching only the brighter-lit side of the marker.
-    DEFAULT_HSV_LOWER = (90, 80, 80)
-    DEFAULT_HSV_UPPER = (120, 255, 255)
+    # percentile 95-100), saturation 50-225 (5th-95th 122-206). The value
+    # lower bound (80) excludes the marker's own shadowed/dark underside
+    # (its lit vs. shadowed sides split almost exactly at V=81, the Otsu
+    # threshold within just the object's own pixels).
+    #
+    # The saturation lower bound is set much higher than the marker's own
+    # sampled range (150, not 80) specifically to reject a real false-
+    # positive found live: a wall-mounted TV/monitor showing bluish-white
+    # content shares a similar HUE to the marker, but is far more washed-
+    # out/desaturated (a solid plastic object vs. a self-lit screen). Also
+    # caps value at 150 for the same reason (a screen's backlight commonly
+    # reads brighter than a diffusely-lit object) -- validated against both
+    # a real marker photo and a real TV-false-positive photo: this single
+    # change (saturation 80->150) alone cut the TV's detected area by
+    # ~140x while barely affecting the marker's own detected area.
+    DEFAULT_HSV_LOWER = (90, 150, 80)
+    DEFAULT_HSV_UPPER = (120, 255, 150)
 
     def __init__(
         self,

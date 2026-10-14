@@ -28,10 +28,10 @@ def rect_quad(x, y, width, height) -> Quad:
         )
     )
 
-# hue=100, sat=200, val=150 in BGR -- squarely inside the tracker's
+# hue=100, sat=200, val=120 in BGR -- comfortably inside the tracker's
 # default teal/cyan-blue Pen Tip color range (measured from a real photo
 # of the physical marker, see DEFAULT_HSV_LOWER/UPPER's comment).
-PEN_TIP_BGR = (150, 111, 32)
+PEN_TIP_BGR = (120, 89, 26)
 
 
 def make_frame_with_blob(center_xy, radius=15, color=PEN_TIP_BGR):
@@ -90,6 +90,20 @@ def test_optical_color_tracker_ignores_colors_outside_configured_range():
     # tracker (hue 90-120).
     tracker = OpticalColorTracker()
     frame = make_frame_with_blob((FRAME_WIDTH // 2, FRAME_HEIGHT // 2), color=(0, 0, 255))
+
+    x, y, is_detected = tracker.get_position(frame)
+
+    assert is_detected is False
+
+
+def test_optical_color_tracker_ignores_a_washed_out_screen_sharing_the_same_hue():
+    # Regression: a wall-mounted TV/monitor showing bluish-white content
+    # was live-observed to false-positive-detect as the Pen Tip -- it
+    # shares a similar hue to the marker, but is far more washed-out
+    # (low saturation, bright) than the solid plastic marker.
+    tracker = OpticalColorTracker()
+    washed_out_bgr = (180, 166, 138)  # hue~100, sat~60, val~180
+    frame = make_frame_with_blob((FRAME_WIDTH // 2, FRAME_HEIGHT // 2), color=washed_out_bgr)
 
     x, y, is_detected = tracker.get_position(frame)
 
