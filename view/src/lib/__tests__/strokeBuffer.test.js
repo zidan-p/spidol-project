@@ -99,7 +99,12 @@ describe('ingestTrackUpdate (pen tool)', () => {
     expect(buffer.activeStroke.points).toEqual([{ x: 0.5, y: 0.5 }])
   })
 
-  it('ignores updates where the tracker reports not-detected', () => {
+  it('still draws updates where the tracker reports not-detected (is_touching is what gates ink)', () => {
+    // Deliberately not gated on is_detected: non-camera touch sources (the
+    // ESP board's switch, a real mouse click) can legitimately report
+    // is_touching=true while the position tracker hasn't locked onto the
+    // marker yet -- ink should still follow whatever position is reported,
+    // rather than silently dropping the point.
     let buffer = createStrokeBuffer()
     buffer = ingestTrackUpdate(buffer, trackUpdate({ x: 0.1, y: 0.1, is_touching: true }), penStyle())
     buffer = ingestTrackUpdate(
@@ -108,7 +113,7 @@ describe('ingestTrackUpdate (pen tool)', () => {
       penStyle()
     )
 
-    expect(buffer.activeStroke.points).toEqual([{ x: 0.1, y: 0.1 }])
+    expect(buffer.activeStroke.points).toEqual([{ x: 0.1, y: 0.1 }, { x: 0.9, y: 0.9 }])
   })
 
   it('does not append a new point when the hand is essentially stationary (jitter dead-zone)', () => {

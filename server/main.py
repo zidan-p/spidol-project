@@ -70,8 +70,9 @@ from dotenv import load_dotenv
 
 from ai.vision_pipeline import DEFAULT_BASE_URL, DEFAULT_MODEL, LazyOpenAIClient
 from hal.image_source import BrowserCanvasImageSource, CameraImageSource, HttpCameraImageSource
+from hal.mouse_fallback_tracker import MouseFallbackPositionTracker
 from hal.os_cursor_controller import OsCursorController
-from hal.providers import BleTouchProvider, KeyboardMockProvider, WifiTouchProvider
+from hal.providers import BleTouchProvider, CompositeTouchProvider, KeyboardMockProvider, WifiTouchProvider
 from hal.smoothing_tracker import SmoothingPositionTracker
 from hal.trackers import OpticalColorTracker, SystemMouseFallbackTracker, detect_screen_size
 from server_app import create_server
@@ -282,11 +283,14 @@ def make_tracker(args: argparse.Namespace, search_region: Quad | None = None):
 
     Always wrapped in `SmoothingPositionTracker` (EMA jitter smoothing --
     `OpticalColorTracker`'s centroid is inherently noisy frame to frame
-    even with the marker held still) before any `--debug-camera` wrapping,
-    so the debug overlay shows the same smoothed position actually
-    broadcast, not the noisier raw one.
+    even with the marker held still), then `MouseFallbackPositionTracker`
+    (substitutes the real OS mouse position whenever the camera hasn't
+    detected the marker, so painting still works purely off a real
+    mouse-down/up gesture regardless of detection -- see that class's
+    docstring), before any `--debug-camera` wrapping, so the debug overlay
+    shows the same position actually broadcast, not a raw undetected one.
 
-    `--debug-camera` wraps the (now-smoothed) tracker in
+    `--debug-camera` wraps the (now-smoothed, fallback-aware) tracker in
     `DebugPreviewTracker` (transparent to the telemetry loop -- same
     `get_position` contract), popping up a local OpenCV preview window of
     what it's actually seeing.
@@ -294,6 +298,7 @@ def make_tracker(args: argparse.Namespace, search_region: Quad | None = None):
     if args.tracker == "optical-color":
         tracker = OpticalColorTracker(search_region=search_region)
         tracker = SmoothingPositionTracker(tracker, alpha=args.jitter_smoothing)
+        tracker = MouseFallbackPositionTracker(tracker)
         if args.debug_camera:
             tracker = DebugPreviewTracker(tracker)
         return tracker
@@ -404,11 +409,30 @@ def make_ai_timeout_s(args: argparse.Namespace) -> float:
     return float(env_value) if env_value else 3.0
 
 
-def make_os_cursor_controller(args: argparse.Namespace):
+def uses_mouse_click(touch_provider) -> bool:
+    """True if `touch_provider` derives Touch Signal (wholly or partly)
+    from a real mouse click via `KeyboardMockProvider`'s global
+    `pynput.mouse.Listener` -- either directly, or as one branch of a
+    `CompositeTouchProvider`.
+    """
+    if isinstance(touch_provider, KeyboardMockProvider):
+        return True
+    if isinstance(touch_provider, CompositeTouchProvider):
+        return any(uses_mouse_click(provider) for provider in touch_provider.providers)
+    return False
+
+
+def make_os_cursor_controller(args: argparse.Namespace, touch_provider):
     """Returns an `OsCursorController` if `--control-os-cursor` was given,
     else `None` -- see that flag's help text for the real tradeoff this
     opts into (never active by default, matching every other optional
     collaborator `create_server` accepts).
+
+    When `touch_provider` derives Touch Signal from a real mouse click
+    (see `uses_mouse_click`), synthesizing clicks here too would feed
+    straight back into that same global `pynput.mouse.Listener`. So in
+    that case the controller only moves the cursor and lets the real
+    click drive Touch Signal naturally at the camera-updated position.
     """
     if not args.control_os_cursor:
         return None
@@ -417,7 +441,8 @@ def make_os_cursor_controller(args: argparse.Namespace):
         "move and click based on tracked input. This can click anywhere on "
         "your screen, including outside this app."
     )
-    return OsCursorController(screen_size=detect_screen_size())
+    synthesize_clicks = not uses_mouse_click(touch_provider)
+    return OsCursorController(screen_size=detect_screen_size(), synthesize_clicks=synthesize_clicks)
 
 
 def calibrate_homography_from_region(homography: HomographyCalibrator, region: Quad, frame_size: tuple[int, int]) -> None:
@@ -467,16 +492,26 @@ async def run(args: argparse.Namespace) -> None:
             logger.info("No tracking region selected; searching the full camera frame.")
 
     tracker = make_tracker(args, search_region=search_region)
-    touch_provider = make_touch_provider(args)
+    # A real mouse click always drives Touch Signal, regardless of which
+    # hardware provider (if any) is also selected below -- so the board
+    # can always be painted with the mouse, in addition to the ESP
+    # Stylus's own switch, rather than the two being mutually exclusive.
+    hardware_touch_provider = make_touch_provider(args)
+    if isinstance(hardware_touch_provider, KeyboardMockProvider):
+        mouse_touch_provider = hardware_touch_provider
+        touch_provider = hardware_touch_provider
+    else:
+        mouse_touch_provider = KeyboardMockProvider()
+        touch_provider = CompositeTouchProvider(hardware_touch_provider, mouse_touch_provider)
+
     vision_client, ai_model = make_vision_client(args)
     ai_timeout_s = make_ai_timeout_s(args)
-    os_cursor_controller = make_os_cursor_controller(args)
+    os_cursor_controller = make_os_cursor_controller(args, touch_provider)
 
-    if isinstance(touch_provider, KeyboardMockProvider):
-        from pynput.mouse import Listener
+    from pynput.mouse import Listener
 
-        listener = Listener(on_click=make_click_handler(touch_provider))
-        listener.start()
+    listener = Listener(on_click=make_click_handler(mouse_touch_provider))
+    listener.start()
 
     if not args.dev:
         if not VIEW_DIST_DIR.exists():
@@ -501,20 +536,20 @@ async def run(args: argparse.Namespace) -> None:
         loss_bridge=loss_bridge,
         os_cursor_controller=os_cursor_controller,
     ) as server:
-        if isinstance(touch_provider, BleTouchProvider):
+        if isinstance(hardware_touch_provider, BleTouchProvider):
             # Wire the real AI Trigger button straight into the server's
             # direct call path (see server_app.py's module docstring) --
             # the BLE notification callback calls this directly, no
             # self-directed WebSocket message involved.
-            touch_provider.set_on_ai_trigger(server.fire_ai_trigger)
-            asyncio.create_task(touch_provider.run_forever())
+            hardware_touch_provider.set_on_ai_trigger(server.fire_ai_trigger)
+            asyncio.create_task(hardware_touch_provider.run_forever())
             print(f"Connecting to SPIDOL Stylus at {args.ble_address}...")
-        elif isinstance(touch_provider, WifiTouchProvider):
+        elif isinstance(hardware_touch_provider, WifiTouchProvider):
             # Same direct-call wiring as the BLE path above -- the WiFi/TCP
             # firmware variant now also sends a "TRIGGER" line (see
             # hal/providers.py), not just touch signal.
-            touch_provider.set_on_ai_trigger(server.fire_ai_trigger)
-            asyncio.create_task(touch_provider.run_forever())
+            hardware_touch_provider.set_on_ai_trigger(server.fire_ai_trigger)
+            asyncio.create_task(hardware_touch_provider.run_forever())
             print(f"Listening for SPIDOL Stylus (WiFi) on TCP port {args.wifi_touch_port}...")
 
         await server.wait_closed()

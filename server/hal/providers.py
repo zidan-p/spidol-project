@@ -150,6 +150,24 @@ class BleTouchProvider(BaseTouchProvider):
         return self._touching
 
 
+class CompositeTouchProvider(BaseTouchProvider):
+    """Combines multiple touch-signal sources with OR logic: Touch Signal
+    is True whenever any one of them reports touching.
+
+    Lets a real mouse click and the ESP32 Stylus's own Tip Contact Switch
+    (over BLE or WiFi) both independently paint the board at once, rather
+    than forcing one exclusive source -- e.g. with `--control-os-cursor`,
+    the camera-tracked cursor can be "clicked" either with the physical
+    mouse button or the ESP board's switch.
+    """
+
+    def __init__(self, *providers: BaseTouchProvider):
+        self.providers = providers
+
+    def is_touching(self) -> bool:
+        return any(provider.is_touching() for provider in self.providers)
+
+
 class WifiTouchProvider(BaseTouchProvider):
     """Touch-signal and AI-Trigger source for the WiFi/TCP firmware variant
     (spidol/src/main.cpp's `WiFiClient`-based firmware): instead of this

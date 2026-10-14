@@ -13,10 +13,12 @@ from main import (
     make_touch_provider,
     make_tracker,
     parse_args,
+    uses_mouse_click,
 )
 from hal.os_cursor_controller import OsCursorController
 from hal.image_source import BrowserCanvasImageSource, CameraImageSource, HttpCameraImageSource
-from hal.providers import BleTouchProvider, KeyboardMockProvider, WifiTouchProvider
+from hal.providers import BleTouchProvider, CompositeTouchProvider, KeyboardMockProvider, WifiTouchProvider
+from hal.mouse_fallback_tracker import MouseFallbackPositionTracker
 from hal.smoothing_tracker import SmoothingPositionTracker
 from hal.trackers import OpticalColorTracker, SystemMouseFallbackTracker
 from vision.debug_preview import DebugPreviewTracker
@@ -124,12 +126,14 @@ def test_make_tracker_returns_system_mouse_fallback_by_default():
 
 
 def test_make_tracker_returns_optical_color_tracker_when_selected():
-    # Always wrapped in SmoothingPositionTracker (jitter smoothing) --
-    # the real OpticalColorTracker is underneath via .inner.
+    # Always wrapped in SmoothingPositionTracker (jitter smoothing), then
+    # MouseFallbackPositionTracker (mouse-position substitute on tracking
+    # loss) -- the real OpticalColorTracker is underneath via .inner.inner.
     args = parse_args(["--tracker", "optical-color"])
     tracker = make_tracker(args)
-    assert isinstance(tracker, SmoothingPositionTracker)
-    assert isinstance(tracker.inner, OpticalColorTracker)
+    assert isinstance(tracker, MouseFallbackPositionTracker)
+    assert isinstance(tracker.inner, SmoothingPositionTracker)
+    assert isinstance(tracker.inner.inner, OpticalColorTracker)
 
 
 def test_parse_args_defaults_debug_camera_to_false():
@@ -139,13 +143,15 @@ def test_parse_args_defaults_debug_camera_to_false():
 
 def test_make_tracker_wraps_in_debug_preview_tracker_when_flag_set():
     # DebugPreviewTracker is the outermost wrapper -- SmoothingPosition
-    # Tracker sits between it and the real OpticalColorTracker, so the
-    # debug overlay shows the same smoothed position actually broadcast.
+    # Tracker and MouseFallbackPositionTracker sit between it and the real
+    # OpticalColorTracker, so the debug overlay shows the same position
+    # actually broadcast.
     args = parse_args(["--tracker", "optical-color", "--debug-camera"])
     tracker = make_tracker(args)
     assert isinstance(tracker, DebugPreviewTracker)
-    assert isinstance(tracker.inner, SmoothingPositionTracker)
-    assert isinstance(tracker.inner.inner, OpticalColorTracker)
+    assert isinstance(tracker.inner, MouseFallbackPositionTracker)
+    assert isinstance(tracker.inner.inner, SmoothingPositionTracker)
+    assert isinstance(tracker.inner.inner.inner, OpticalColorTracker)
 
 
 def test_parse_args_defaults_jitter_smoothing_to_0_3():
@@ -184,8 +190,9 @@ def test_make_tracker_applies_search_region_to_optical_color_tracker():
 
     tracker = make_tracker(args, search_region=region)
 
-    assert isinstance(tracker, SmoothingPositionTracker)
-    assert isinstance(tracker.inner, OpticalColorTracker)
+    assert isinstance(tracker, MouseFallbackPositionTracker)
+    assert isinstance(tracker.inner, SmoothingPositionTracker)
+    assert isinstance(tracker.inner.inner, OpticalColorTracker)
     assert tracker.search_region == region
 
 
@@ -298,12 +305,52 @@ def test_parse_args_recognizes_control_os_cursor_flag():
 
 def test_make_os_cursor_controller_returns_none_by_default():
     args = parse_args([])
-    assert make_os_cursor_controller(args) is None
+    assert make_os_cursor_controller(args, KeyboardMockProvider()) is None
 
 
 def test_make_os_cursor_controller_returns_a_controller_when_flag_given():
     args = parse_args(["--control-os-cursor"])
-    assert isinstance(make_os_cursor_controller(args), OsCursorController)
+    assert isinstance(make_os_cursor_controller(args, KeyboardMockProvider()), OsCursorController)
+
+
+def test_make_os_cursor_controller_disables_synthetic_clicks_for_keyboard_mock_provider():
+    # KeyboardMockProvider already derives Touch Signal from a real mouse
+    # click via its own global pynput.mouse.Listener -- this controller
+    # synthesizing clicks too would feed back into that same listener.
+    args = parse_args(["--control-os-cursor"])
+    controller = make_os_cursor_controller(args, KeyboardMockProvider())
+    assert controller._synthesize_clicks is False
+
+
+def test_make_os_cursor_controller_enables_synthetic_clicks_for_other_touch_providers():
+    args = parse_args(["--control-os-cursor"])
+    controller = make_os_cursor_controller(args, WifiTouchProvider(port=0))
+    assert controller._synthesize_clicks is True
+
+
+def test_uses_mouse_click_true_for_keyboard_mock_provider():
+    assert uses_mouse_click(KeyboardMockProvider()) is True
+
+
+def test_uses_mouse_click_false_for_wifi_touch_provider_alone():
+    assert uses_mouse_click(WifiTouchProvider(port=0)) is False
+
+
+def test_uses_mouse_click_true_for_composite_including_a_mouse_source():
+    composite = CompositeTouchProvider(WifiTouchProvider(port=0), KeyboardMockProvider())
+    assert uses_mouse_click(composite) is True
+
+
+def test_make_os_cursor_controller_disables_synthetic_clicks_for_composite_with_mouse():
+    # The design this session's --wifi-touch-port + --control-os-cursor
+    # combination relies on: run() always combines a real mouse click with
+    # whatever hardware touch source is selected (CompositeTouchProvider),
+    # so the mouse listener is active whenever an ESP board is also wired
+    # up -- synthetic clicks must stay off in that case too.
+    args = parse_args(["--control-os-cursor"])
+    composite = CompositeTouchProvider(WifiTouchProvider(port=0), KeyboardMockProvider())
+    controller = make_os_cursor_controller(args, composite)
+    assert controller._synthesize_clicks is False
 
 
 def test_parse_args_defaults_flip_camera_to_false():

@@ -54,6 +54,8 @@ PRESETS = {
         "--camera-url", IP_WEBCAM_URL,
         "--adjust-tracking-region",
         "--debug-camera",
+        "--control-os-cursor",
+        "--wifi-touch-port", WIFI_TOUCH_PORT,
     ],
 }
 

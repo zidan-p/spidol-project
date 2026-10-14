@@ -93,3 +93,44 @@ def test_update_releases_if_tracking_is_lost_while_touching():
 
     assert len(mouse.pressed) == 1
     assert len(mouse.released) == 1
+
+
+def test_synthesize_clicks_false_still_moves_the_cursor():
+    mouse = _FakeMouse()
+    controller = OsCursorController(
+        screen_size=(1000, 500), mouse_factory=lambda: mouse, synthesize_clicks=False
+    )
+
+    controller.update(x=0.25, y=0.5, is_touching=False, is_detected=True)
+
+    assert mouse.position == (250, 250)
+
+
+def test_synthesize_clicks_false_never_presses_or_releases():
+    # When Touch Signal already comes from a real click (KeyboardMockProvider's
+    # own global pynput.mouse.Listener), synthesizing a click here too would
+    # feed back into that same listener -- so this mode must only move the
+    # cursor, letting the real button press/release drive Touch Signal.
+    mouse = _FakeMouse()
+    controller = OsCursorController(
+        screen_size=(1000, 500), mouse_factory=lambda: mouse, synthesize_clicks=False
+    )
+
+    controller.update(x=0.1, y=0.1, is_touching=True, is_detected=True)
+    controller.update(x=0.2, y=0.2, is_touching=False, is_detected=True)
+
+    assert mouse.pressed == []
+    assert mouse.released == []
+
+
+def test_synthesize_clicks_false_does_not_release_on_tracking_loss_either():
+    mouse = _FakeMouse()
+    controller = OsCursorController(
+        screen_size=(1000, 500), mouse_factory=lambda: mouse, synthesize_clicks=False
+    )
+
+    controller.update(x=0.1, y=0.1, is_touching=True, is_detected=True)
+    controller.update(x=0.0, y=0.0, is_touching=True, is_detected=False)
+
+    assert mouse.pressed == []
+    assert mouse.released == []

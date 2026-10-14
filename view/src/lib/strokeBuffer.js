@@ -106,13 +106,6 @@ function finalizeStroke(buffer, activeStroke) {
 }
 
 export function ingestTrackUpdate(buffer, message, style) {
-  if (!message.is_detected) {
-    // Tracking loss handling (interpolation / pen-up after ~150ms) is an
-    // OpticalColorTracker-specific concern for a later ticket; the mouse
-    // tracker always reports is_detected=true, so v1 just drops the point.
-    return { ...buffer, lastAction: null }
-  }
-
   const point = { x: message.x, y: message.y }
 
   if (message.is_touching) {
