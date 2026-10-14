@@ -70,8 +70,9 @@ from dotenv import load_dotenv
 
 from ai.vision_pipeline import DEFAULT_BASE_URL, DEFAULT_MODEL, LazyOpenAIClient
 from hal.image_source import BrowserCanvasImageSource, CameraImageSource, HttpCameraImageSource
+from hal.os_cursor_controller import OsCursorController
 from hal.providers import BleTouchProvider, KeyboardMockProvider, WifiTouchProvider
-from hal.trackers import OpticalColorTracker, SystemMouseFallbackTracker
+from hal.trackers import OpticalColorTracker, SystemMouseFallbackTracker, detect_screen_size
 from server_app import create_server
 from vision.debug_preview import DebugPreviewTracker
 from vision.homography import HomographyCalibrator
@@ -138,6 +139,22 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
             "typically faces the user directly, so a raw frame moves opposite to "
             "the user's real-world left/right, like a security camera rather than "
             "a mirror."
+        ),
+    )
+    parser.add_argument(
+        "--control-os-cursor",
+        action="store_true",
+        help=(
+            "DANGEROUS, explicitly opt-in: moves the REAL OS mouse cursor to follow "
+            "the tracked Pen Tip, and synthesizes a real left-click press/release on "
+            "Touch Signal transitions -- letting the tracked marker replace the "
+            "mouse for arbitrary on-screen UI, not just this app's own canvas. "
+            "Unlike the Stylus's own Touch Signal (ADR-0001, which deliberately "
+            "never drives the OS cursor to avoid a stray click landing wherever the "
+            "literal cursor sits), this is a separate, clearly-labeled capability "
+            "you are opting into with that same risk. Works with --tracker="
+            "optical-color (camera-tracked) or --tracker=mouse (pointless but "
+            "harmless -- the cursor already follows your own mouse)."
         ),
     )
     parser.add_argument(
@@ -365,6 +382,22 @@ def make_ai_timeout_s(args: argparse.Namespace) -> float:
     return float(env_value) if env_value else 3.0
 
 
+def make_os_cursor_controller(args: argparse.Namespace):
+    """Returns an `OsCursorController` if `--control-os-cursor` was given,
+    else `None` -- see that flag's help text for the real tradeoff this
+    opts into (never active by default, matching every other optional
+    collaborator `create_server` accepts).
+    """
+    if not args.control_os_cursor:
+        return None
+    print(
+        "WARNING: --control-os-cursor is active -- the real mouse cursor will "
+        "move and click based on tracked input. This can click anywhere on "
+        "your screen, including outside this app."
+    )
+    return OsCursorController(screen_size=detect_screen_size())
+
+
 async def run(args: argparse.Namespace) -> None:
     # Built first (and reused for the picker below, never opened twice) --
     # make_tracker needs the resolved search_region before it constructs
@@ -388,6 +421,7 @@ async def run(args: argparse.Namespace) -> None:
     touch_provider = make_touch_provider(args)
     vision_client, ai_model = make_vision_client(args)
     ai_timeout_s = make_ai_timeout_s(args)
+    os_cursor_controller = make_os_cursor_controller(args)
 
     if isinstance(touch_provider, KeyboardMockProvider):
         from pynput.mouse import Listener
@@ -416,6 +450,7 @@ async def run(args: argparse.Namespace) -> None:
         image_source=image_source,
         homography=homography,
         loss_bridge=loss_bridge,
+        os_cursor_controller=os_cursor_controller,
     ) as server:
         if isinstance(touch_provider, BleTouchProvider):
             # Wire the real AI Trigger button straight into the server's

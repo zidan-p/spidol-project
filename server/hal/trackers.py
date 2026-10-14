@@ -22,6 +22,25 @@ def _default_position_source() -> tuple[int, int]:
     return controller.position
 
 
+def detect_screen_size() -> tuple[float, float]:
+    """Real display resolution in pixels -- shared by `SystemMouseFallback
+    Tracker` (normalizing the real cursor's position) and
+    `hal.os_cursor_controller.OsCursorController` (mapping a normalized
+    tracked position back out to real screen pixels), so both agree on the
+    same screen regardless of which one actually detects it.
+    """
+    from pynput.mouse import Controller as _Unused  # noqa: F401 -- ensures pynput import errors surface early
+    import ctypes
+
+    try:
+        user32 = ctypes.windll.user32
+        return (user32.GetSystemMetrics(0), user32.GetSystemMetrics(1))
+    except AttributeError:
+        # Non-Windows fallback: a reasonable default; real multi-platform
+        # screen-size detection is out of scope for this tracer bullet.
+        return (1920, 1080)
+
+
 class SystemMouseFallbackTracker(BasePositionTracker):
     """Reports the real OS mouse cursor position, normalized to [0, 1].
 
@@ -35,20 +54,7 @@ class SystemMouseFallbackTracker(BasePositionTracker):
         screen_size: tuple[float, float] | None = None,
     ):
         self._position_source = position_source or _default_position_source
-        self._screen_size = screen_size or self._detect_screen_size()
-
-    @staticmethod
-    def _detect_screen_size() -> tuple[float, float]:
-        from pynput.mouse import Controller as _Unused  # noqa: F401 -- ensures pynput import errors surface early
-        import ctypes
-
-        try:
-            user32 = ctypes.windll.user32
-            return (user32.GetSystemMetrics(0), user32.GetSystemMetrics(1))
-        except AttributeError:
-            # Non-Windows fallback: a reasonable default; real multi-platform
-            # screen-size detection is out of scope for this tracer bullet.
-            return (1920, 1080)
+        self._screen_size = screen_size or detect_screen_size()
 
     def get_position(self, frame=None) -> tuple[float, float, bool]:
         raw_x, raw_y = self._position_source()

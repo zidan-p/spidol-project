@@ -4,7 +4,15 @@ bridge (the ticket 01 stand-in for a real Tip Contact Switch), plus ticket
 real Stylus firmware via `BleTouchProvider`."""
 from pynput.mouse import Button
 
-from main import make_camera_resources, make_click_handler, make_touch_provider, make_tracker, parse_args
+from main import (
+    make_camera_resources,
+    make_click_handler,
+    make_os_cursor_controller,
+    make_touch_provider,
+    make_tracker,
+    parse_args,
+)
+from hal.os_cursor_controller import OsCursorController
 from hal.image_source import BrowserCanvasImageSource, CameraImageSource, HttpCameraImageSource
 from hal.providers import BleTouchProvider, KeyboardMockProvider, WifiTouchProvider
 from hal.trackers import OpticalColorTracker, SystemMouseFallbackTracker
@@ -208,6 +216,26 @@ def test_make_camera_resources_returns_camera_backed_resources_for_optical_color
     assert isinstance(image_source, CameraImageSource)
     assert isinstance(homography, HomographyCalibrator)
     assert isinstance(loss_bridge, TrackingLossBridge)
+
+
+def test_parse_args_defaults_control_os_cursor_to_false():
+    args = parse_args([])
+    assert args.control_os_cursor is False
+
+
+def test_parse_args_recognizes_control_os_cursor_flag():
+    args = parse_args(["--control-os-cursor"])
+    assert args.control_os_cursor is True
+
+
+def test_make_os_cursor_controller_returns_none_by_default():
+    args = parse_args([])
+    assert make_os_cursor_controller(args) is None
+
+
+def test_make_os_cursor_controller_returns_a_controller_when_flag_given():
+    args = parse_args(["--control-os-cursor"])
+    assert isinstance(make_os_cursor_controller(args), OsCursorController)
 
 
 def test_parse_args_defaults_flip_camera_to_false():

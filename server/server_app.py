@@ -178,6 +178,7 @@ async def _telemetry_loop(
     image_source: BaseImageSource,
     homography: HomographyCalibrator | None = None,
     loss_bridge: TrackingLossBridge | None = None,
+    os_cursor_controller=None,
 ):
     frame_interval = 1 / fps
     last = time.monotonic()
@@ -204,6 +205,11 @@ async def _telemetry_loop(
             stroke_tracker.ingest(
                 x=sample.x, y=sample.y, is_touching=is_touching, is_detected=sample.is_detected
             )
+
+            if os_cursor_controller is not None:
+                os_cursor_controller.update(
+                    x=sample.x, y=sample.y, is_touching=is_touching, is_detected=sample.is_detected
+                )
 
             message = build_track_update(
                 device_id=DEVICE_ID,
@@ -232,9 +238,17 @@ async def create_server(
     ai_model: str = DEFAULT_MODEL,
     homography: HomographyCalibrator | None = None,
     loss_bridge: TrackingLossBridge | None = None,
+    os_cursor_controller=None,
 ):
     """Starts the WebSocket server, its telemetry broadcast loop, and the AI
     Trigger hook together.
+
+    `os_cursor_controller` (`hal.os_cursor_controller.OsCursorController`,
+    opt-in via `--control-os-cursor`) is forwarded straight into the
+    telemetry loop, which calls its `update()` once per resolved sample --
+    `None` by default, matching every other optional collaborator here
+    (`homography`, `loss_bridge`), so nothing changes unless it's
+    explicitly passed in.
 
     `vision_client` is optional and defaults to `None` (no live API calls --
     every AI Trigger serves the Cached Fallback Schema instead; see
@@ -288,6 +302,7 @@ async def create_server(
                 image_source,
                 homography=homography,
                 loss_bridge=loss_bridge,
+                os_cursor_controller=os_cursor_controller,
             )
         )
         try:

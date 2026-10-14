@@ -61,6 +61,40 @@ async def test_touch_provider_state_is_reflected_in_next_broadcast():
 
 
 @pytest.mark.asyncio
+async def test_os_cursor_controller_receives_each_resolved_sample():
+    # os_cursor_controller is an opt-in collaborator (--control-os-cursor,
+    # hal/os_cursor_controller.py) -- when passed, the telemetry loop calls
+    # its update() once per resolved sample, same as stroke_tracker.ingest().
+    port = await _free_port()
+    tracker = SystemMouseFallbackTracker(position_source=lambda: (100, 50), screen_size=(1000, 1000))
+    touch_provider = KeyboardMockProvider()
+    touch_provider.set_touching(True)
+    calls = []
+
+    class _RecordingCursorController:
+        def update(self, *, x, y, is_touching, is_detected):
+            calls.append((x, y, is_touching, is_detected))
+
+    async with create_server(
+        tracker,
+        touch_provider,
+        host="127.0.0.1",
+        port=port,
+        fps=60,
+        os_cursor_controller=_RecordingCursorController(),
+    ):
+        async with websockets.connect(f"ws://127.0.0.1:{port}") as client:
+            await asyncio.wait_for(client.recv(), timeout=1)
+
+    assert len(calls) >= 1
+    x, y, is_touching, is_detected = calls[0]
+    assert x == pytest.approx(0.1)
+    assert y == pytest.approx(0.05)
+    assert is_touching is True
+    assert is_detected is True
+
+
+@pytest.mark.asyncio
 async def test_multiple_clients_all_receive_broadcasts():
     port = await _free_port()
     tracker = SystemMouseFallbackTracker(position_source=lambda: (0, 0), screen_size=(1000, 1000))

@@ -28,6 +28,10 @@ _Avoid_: Blackout mode (that's the visual pitch-black rendering state, a separat
 The press/release state of the Tip Contact Switch, carried from firmware to server as a custom BLE GATT characteristic notification (consumed by `BleTouchProvider`), never as an HID mouse click. Fully decoupled from Pen Tip position, which arrives separately over the camera/WebSocket path. A WiFi/TCP firmware variant (`spidol/src/main.cpp`, `server/hal/providers.py`'s `WifiTouchProvider`) carries the same Touch Signal over a plain TCP connection instead -- the ESP32 connects out to the server and sends newline-terminated "1"/"0" lines on each transition -- and, over that same connection, a "TRIGGER" line once per AI Trigger button press; still never an HID mouse click either way.
 _Avoid_: BLE mouse click, HID click
 
+**OS Cursor Control**:
+An explicitly opt-in capability (`--control-os-cursor`, `server/hal/os_cursor_controller.py`'s `OsCursorController`) that moves the real OS mouse cursor to follow the tracked Pen Tip position and synthesizes a real left-click on Touch Signal transitions -- letting the tracked marker genuinely replace the mouse for arbitrary on-screen UI, not just this app's own canvas. Deliberately separate from, and never implied by, the Touch Signal itself: this is the opposite choice from ADR-0001 (which keeps the Stylus's own Touch Signal away from the OS cursor specifically to avoid a stray click landing wherever the literal cursor sits), made consciously for this one specific, clearly-labeled, user-requested use case. Never active unless the flag is passed; nothing else in the pipeline changes when it isn't.
+_Avoid_: Virtual mouse (describes the feature, but implies it's a default/expected mode, which it deliberately isn't)
+
 **AI Trigger**:
 The body button press (GPIO5) that explicitly submits the current region of interest to the AI pipeline. Never fires automatically from contour detection alone — closed-contour detection only narrows which strokes make up the region, it doesn't invoke the AI by itself.
 _Avoid_: Auto-detect, gesture trigger
