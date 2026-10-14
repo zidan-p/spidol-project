@@ -4,7 +4,11 @@
 // `style` argument.
 import { Palette, PenTool, SeparatorHorizontal } from 'lucide-react'
 
-const COLORS = ['#ffffff', '#ff3b30', '#34c759', '#0a84ff', '#ffd60a']
+// Deliberately violet, not blue (#0a84ff was hue 105 -- dead center in
+// OpticalColorTracker's tracked Pen Tip hue range, 90-120, and at full
+// saturation/value -- drawing with it risked the ink itself being
+// detected as the marker). Hue ~132, safely clear of that range.
+const COLORS = ['#ffffff', '#ff3b30', '#34c759', '#6d28d9', '#ffd60a']
 const WIDTHS = [2, 4, 8]
 const DASH_STYLES = [
   { id: 'solid', label: 'Solid' },
@@ -20,7 +24,7 @@ const OPTION_BUTTON_CLASS =
 export function PropertySidebar({ color, onColorChange, width, onWidthChange, dash, onDashChange }) {
   return (
     <div className="absolute top-20 left-4 z-10 flex flex-col gap-3.5 rounded-2xl border border-chrome-border bg-chrome-bg p-3.5 shadow-[0_8px_24px_rgba(0,0,0,0.45)] backdrop-blur-md">
-      <fieldset className="m-0 flex flex-col gap-2 border-none p-0">
+      {/* <fieldset className="m-0 flex flex-col gap-2 border-none p-0">
         <legend className={LEGEND_CLASS}>
           <Palette size={14} aria-hidden="true" /> Color
         </legend>
@@ -38,7 +42,7 @@ export function PropertySidebar({ color, onColorChange, width, onWidthChange, da
             />
           ))}
         </div>
-      </fieldset>
+      </fieldset> */}
 
       <fieldset className="m-0 flex flex-col gap-2 border-none p-0">
         <legend className={LEGEND_CLASS}>

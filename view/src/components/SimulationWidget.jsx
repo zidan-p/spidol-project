@@ -111,12 +111,15 @@ function SpringMassWidget({ values }) {
       const centerX = width / 2
       const centerY = height / 2
       const bobX = centerX + state.position * (width / 6)
-      ctx.strokeStyle = '#8ab4f8'
+      // Deliberately violet, not blue (#8ab4f8 was hue 109 -- inside
+      // OpticalColorTracker's tracked Pen Tip hue range, 90-120). Hue ~128,
+      // safely clear of that range.
+      ctx.strokeStyle = '#a78bfa'
       ctx.beginPath()
       ctx.moveTo(centerX, 10)
       ctx.lineTo(bobX, centerY)
       ctx.stroke()
-      ctx.fillStyle = '#8ab4f8'
+      ctx.fillStyle = '#a78bfa'
       ctx.beginPath()
       ctx.arc(bobX, centerY, 10, 0, Math.PI * 2)
       ctx.fill()

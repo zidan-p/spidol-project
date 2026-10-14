@@ -8,8 +8,13 @@
   --color-chrome-border: rgba(255, 255, 255, 0.08);
   --color-chrome-text: #e5e7eb;
   --color-chrome-muted: #9ca3af;
-  --color-accent: #7c93ff;
-  --color-accent-soft: rgba(124, 147, 255, 0.18);
+  /* Deliberately violet, not blue/teal (#7c93ff was hue 115 -- squarely
+     inside OpticalColorTracker's tracked Pen Tip hue range, 90-120 -- so
+     this UI's own accent color could never cause a false "DETECTED" state
+     if the camera ever sees this page, e.g. displayed on a monitor in
+     frame). Hue ~135, safely clear of that range. */
+  --color-accent: #c084fc;
+  --color-accent-soft: rgba(192, 132, 252, 0.18);
   --color-ok: #4ade80;
   --color-warn: #fbbf24;
   --color-danger: #f87171;
