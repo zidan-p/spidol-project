@@ -50,6 +50,13 @@ class CameraImageSource(BaseImageSource):
     parameter precisely so tests can inject a fake capture object (no real
     camera/RemoteCam hardware needed), mirroring `BleTouchProvider`'s
     `client_factory` seam in `hal/providers.py`.
+
+    `flip_horizontal` mirrors every captured frame left-right -- a PC
+    webcam typically faces the user directly (unlike the rig's intended
+    overhead/angled observer camera), so a raw frame moves opposite to the
+    user's real-world left/right, like a security camera rather than a
+    mirror. Defaults to `False` (the rig's normal camera placement needs no
+    correction).
     """
 
     def __init__(
@@ -58,6 +65,7 @@ class CameraImageSource(BaseImageSource):
         width: int = 1280,
         height: int = 720,
         capture_factory=None,
+        flip_horizontal: bool = False,
     ):
         if capture_factory is None:
             import cv2
@@ -66,7 +74,12 @@ class CameraImageSource(BaseImageSource):
 
         self._width = width
         self._height = height
+        self._flip_horizontal = flip_horizontal
         self._capture = capture_factory(camera_index)
+
+    @property
+    def flip_horizontal(self) -> bool:
+        return self._flip_horizontal
 
     def capture_frame(self) -> np.ndarray:
         ok, frame = self._capture.read()
@@ -75,6 +88,8 @@ class CameraImageSource(BaseImageSource):
             # fall back to a blank frame rather than raising, so one dropped
             # frame doesn't crash the telemetry loop or an AI Trigger crop.
             return np.full((self._height, self._width, 3), 255, dtype=np.uint8)
+        if self._flip_horizontal:
+            frame = frame[:, ::-1, :]
         return frame
 
     def release(self) -> None:

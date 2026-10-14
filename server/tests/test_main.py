@@ -210,6 +210,30 @@ def test_make_camera_resources_returns_camera_backed_resources_for_optical_color
     assert isinstance(loss_bridge, TrackingLossBridge)
 
 
+def test_parse_args_defaults_flip_camera_to_false():
+    args = parse_args([])
+    assert args.flip_camera is False
+
+
+def test_parse_args_recognizes_flip_camera_flag():
+    args = parse_args(["--tracker", "optical-color", "--flip-camera"])
+    assert args.flip_camera is True
+
+
+def test_make_camera_resources_passes_flip_camera_through_to_camera_image_source():
+    args = parse_args(["--tracker", "optical-color", "--flip-camera"])
+    image_source, _, _ = make_camera_resources(args, capture_factory=_FakeVideoCapture)
+
+    assert image_source.flip_horizontal is True
+
+
+def test_make_camera_resources_does_not_flip_by_default():
+    args = parse_args(["--tracker", "optical-color"])
+    image_source, _, _ = make_camera_resources(args, capture_factory=_FakeVideoCapture)
+
+    assert image_source.flip_horizontal is False
+
+
 def test_parse_args_defaults_camera_url_to_none():
     args = parse_args([])
     assert args.camera_url is None

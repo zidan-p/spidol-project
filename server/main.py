@@ -130,6 +130,17 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         ),
     )
     parser.add_argument(
+        "--flip-camera",
+        action="store_true",
+        help=(
+            "When --tracker=optical-color with a USB/UVC device (--camera-index, "
+            "not --camera-url), mirror the captured frame left-right. A PC webcam "
+            "typically faces the user directly, so a raw frame moves opposite to "
+            "the user's real-world left/right, like a security camera rather than "
+            "a mirror."
+        ),
+    )
+    parser.add_argument(
         "--debug-camera",
         action="store_true",
         help=(
@@ -293,7 +304,10 @@ def make_camera_resources(args: argparse.Namespace, capture_factory=None):
     `--camera-url`, if given, selects `HttpCameraImageSource` (a camera
     streamed over HTTP, e.g. a phone running an "IP Webcam"-style app)
     instead of `CameraImageSource` (a USB/UVC device index) -- takes
-    precedence over `--camera-index` when both are set.
+    precedence over `--camera-index` when both are set. `--flip-camera`
+    only applies to the `CameraImageSource` (device-index) path -- a PC
+    webcam typically faces the user directly, unlike a phone stream, which
+    is usually already positioned the way the rig expects.
     """
     if args.tracker != "optical-color":
         return BrowserCanvasImageSource(), None, None
@@ -302,7 +316,9 @@ def make_camera_resources(args: argparse.Namespace, capture_factory=None):
     if args.camera_url:
         image_source = HttpCameraImageSource(url=args.camera_url, **kwargs)
     else:
-        image_source = CameraImageSource(camera_index=args.camera_index, **kwargs)
+        image_source = CameraImageSource(
+            camera_index=args.camera_index, flip_horizontal=args.flip_camera, **kwargs
+        )
     homography = HomographyCalibrator()
     loss_bridge = TrackingLossBridge()
     return image_source, homography, loss_bridge

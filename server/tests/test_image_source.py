@@ -96,6 +96,41 @@ def test_camera_image_source_falls_back_to_blank_frame_when_read_fails():
     assert frame.shape == (720, 1280, 3)
 
 
+def test_camera_image_source_does_not_flip_by_default():
+    # Left half red, right half blue -- distinguishable so a flip is
+    # unambiguous.
+    frame = np.zeros((10, 10, 3), dtype=np.uint8)
+    frame[:, :5] = (0, 0, 255)  # BGR red
+    frame[:, 5:] = (255, 0, 0)  # BGR blue
+    source = CameraImageSource(
+        camera_index=0, capture_factory=lambda index: _FakeVideoCapture(index, frame=frame)
+    )
+
+    result = source.capture_frame()
+
+    assert (result == frame).all()
+
+
+def test_camera_image_source_mirrors_left_right_when_flip_enabled():
+    # A PC camera facing the user needs mirroring so moving the marker
+    # left (from the user's perspective) moves ink left on screen too,
+    # instead of the inverted "security camera" view a raw frame gives.
+    frame = np.zeros((10, 10, 3), dtype=np.uint8)
+    frame[:, :5] = (0, 0, 255)  # BGR red (left half)
+    frame[:, 5:] = (255, 0, 0)  # BGR blue (right half)
+    source = CameraImageSource(
+        camera_index=0,
+        capture_factory=lambda index: _FakeVideoCapture(index, frame=frame),
+        flip_horizontal=True,
+    )
+
+    result = source.capture_frame()
+
+    assert (result == frame[:, ::-1, :]).all()
+    assert (result[:, :5] == (255, 0, 0)).all()  # now blue on the left
+    assert (result[:, 5:] == (0, 0, 255)).all()  # now red on the right
+
+
 # HttpCameraImageSource (a phone running an "IP Webcam"-style app, streaming
 # MJPEG over HTTP -- e.g. http://127.0.0.1:8081/video -- rather than a
 # USB/UVC device). Reuses `_FakeVideoCapture` since `cv2.VideoCapture` opens
