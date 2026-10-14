@@ -4,11 +4,14 @@
 // `style` argument.
 import { Palette, PenTool, SeparatorHorizontal } from 'lucide-react'
 
-// Deliberately violet, not blue (#0a84ff was hue 105 -- dead center in
+// Deliberately magenta, not blue (#0a84ff was hue 105 -- dead center in
 // OpticalColorTracker's tracked Pen Tip hue range, 90-120, and at full
 // saturation/value -- drawing with it risked the ink itself being
-// detected as the marker). Hue ~132, safely clear of that range.
-const COLORS = ['#ffffff', '#ff3b30', '#34c759', '#6d28d9', '#ffd60a']
+// detected as the marker). An earlier violet replacement (hue ~132) still
+// visually read as "closer to blue" once actually displayed -- violet
+// sits close enough to blue on the hue wheel for display/camera color
+// shift to matter. Hue ~168 has much more margin.
+const COLORS = ['#ffffff', '#ff3b30', '#34c759', '#be185d', '#ffd60a']
 const WIDTHS = [2, 4, 8]
 const DASH_STYLES = [
   { id: 'solid', label: 'Solid' },

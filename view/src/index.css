@@ -8,13 +8,19 @@
   --color-chrome-border: rgba(255, 255, 255, 0.08);
   --color-chrome-text: #e5e7eb;
   --color-chrome-muted: #9ca3af;
-  /* Deliberately violet, not blue/teal (#7c93ff was hue 115 -- squarely
-     inside OpticalColorTracker's tracked Pen Tip hue range, 90-120 -- so
-     this UI's own accent color could never cause a false "DETECTED" state
-     if the camera ever sees this page, e.g. displayed on a monitor in
-     frame). Hue ~135, safely clear of that range. */
-  --color-accent: #c084fc;
-  --color-accent-soft: rgba(192, 132, 252, 0.18);
+  /* Deliberately magenta/pink, not blue/teal or violet (#7c93ff was hue
+     115 -- squarely inside OpticalColorTracker's tracked Pen Tip hue
+     range, 90-120 -- so this UI's own accent color could never cause a
+     false "DETECTED" state if the camera ever sees this page, e.g.
+     displayed on a monitor in frame). An earlier violet replacement
+     (hue ~135) still visually read as "closer to blue" once actually
+     displayed -- a monitor/projector/camera's own color reproduction can
+     shift a hue, and violet sits close enough to blue on the wheel for
+     that shift to matter. Hue ~165 (magenta/hot pink) has much more
+     margin on both sides -- far from blue/teal (90-120) and far from
+     red's own wrap-around band (170-179/0-10). */
+  --color-accent: #ec4899;
+  --color-accent-soft: rgba(236, 72, 153, 0.18);
   --color-ok: #4ade80;
   --color-warn: #fbbf24;
   --color-danger: #f87171;
