@@ -4,7 +4,7 @@
 
 # SPIDOL
 
-Papan tulis interaktif berbiaya rendah. SPIDOL mengubah papan tulis dan proyektor kelas biasa menjadi papan tulis interaktif dengan satu spidol yang dimodifikasi. Komponen spidolnya berbiaya di bawah Rp150.000, dibanding Rp30–60 juta untuk smartboard komersial.
+Papan tulis interaktif berbiaya rendah. SPIDOL (*Sistem Pena Interaktif Deteksi Optik & Low-Cost*) mengubah papan tulis dan proyektor kelas biasa menjadi papan tulis interaktif dengan satu spidol yang dimodifikasi. Komponen spidolnya berbiaya di bawah Rp150.000, dibanding Rp30–60 juta untuk smartboard komersial.
 
 <p align="center">
   <img src="./docs/assets/preview-ui.png" alt="Tampilan SPIDOL: integral tentu ditulis tangan di kanvas, dilingkari, lalu AI menampilkan grafik fungsi dengan area berarsir dan nilai integralnya" width="100%">
@@ -12,19 +12,11 @@ Papan tulis interaktif berbiaya rendah. SPIDOL mengubah papan tulis dan proyekto
 
 <p align="center"><em>Contoh: integral tentu ditulis tangan di kanvas, lalu <b>Analyze drawing</b> menampilkan grafiknya lengkap dengan area berarsir dan nilai integral (6,17), serta slider untuk menelusuri kurva.</em></p>
 
-### Demonstrasi goresan
-
-<p align="center">
-  <img src="./docs/assets/demo-stroke.webp" alt="Demonstrasi goresan: spidol dengan ujung berwarna digerakkan di depan layar, dan garis digital tergambar di kanvas mengikuti ujung spidol" width="70%">
-</p>
-
-<p align="center"><em>Menulis langsung dengan spidol SPIDOL: posisi ujung spidol menjadi kursor dan sentuhan menjadi klik, sehingga garis tergambar di kanvas tepat di bawah ujung spidol.</em></p>
-
 ## Daftar Isi
 
-- [Demonstrasi goresan](#demonstrasi-goresan)
 - [Apa yang Dilakukan SPIDOL](#apa-yang-dilakukan-spidol)
   - [Cara kerja](#cara-kerja)
+  - [Demonstrasi goresan](#demonstrasi-goresan)
 - [Struktur Repositori](#struktur-repositori)
 - [Daftar Komponen (BOM)](#daftar-komponen-bom)
 - [Cara Menjalankan](#cara-menjalankan)
@@ -51,6 +43,14 @@ Spidol tidak punya tombol tambahan karena seluruh fitur dioperasikan lewat posis
 ![alt text](docs/assets/flowchart.png)
 
 Firmware hanya mengirim status sentuh; posisi sepenuhnya berasal dari kamera. Menulis, menggambar, dan menampilkan grafik berjalan lokal di laptop. Internet hanya dipakai saat AI diminta membaca rumus.
+
+### Demonstrasi goresan
+
+<p align="center">
+  <img src="./docs/assets/demo-stroke.webp" alt="Demonstrasi goresan: spidol dengan ujung berwarna digerakkan di depan layar, dan garis digital tergambar di kanvas mengikuti ujung spidol" width="70%">
+</p>
+
+<p align="center"><em>Menulis langsung dengan spidol SPIDOL: posisi ujung spidol menjadi kursor dan sentuhan menjadi klik, sehingga garis tergambar di kanvas tepat di bawah ujung spidol.</em></p>
 
 <!-- TODO gambar: foto spidol yang dibongkar (sensor kapasitif + ESP32) dan foto rangkaian akhir. -->
 
