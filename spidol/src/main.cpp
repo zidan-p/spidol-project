@@ -1,89 +1,51 @@
-#include <WiFi.h>
+#include "BluetoothSerial.h"
 
-// ====== KONFIGURASI ======
-const char* ssid     = "Pinang Merah LT-2";
-const char* password = "Pinangmerah36";
+// Cek apakah Bluetooth aktif di konfigurasi ESP32
+#if !defined(CONFIG_BT_ENABLED) || !defined(CONFIG_BLUEDROID_ENABLED)
+#error Bluetooth is not enabled! Please run make menuconfig to enable it
+#endif
 
-// IP laptop yang menjalankan `python main.py --wifi-touch-port 8090`
-// (cek dengan ipconfig di Windows atau ifconfig di Mac/Linux -- harus
-// adapter Wi-Fi yang sebenarnya, satu jaringan dengan ESP32 ini).
-// Port 8080 sengaja dihindari -- di laptop ini sudah dipakai proses lain
-// (whatsapp-bridge.exe), jadi server kita tidak bisa listen di situ.
-const char* serverIP = "192.168.110.104";
-const int   serverPort = 8090;
+BluetoothSerial SerialBT;
 
-// ====== PIN TOMBOL ======
-// Microswitch (mouse-click style limit switch, e.g. Omron D2F) wired
-// between GPIO5 and GND -- no signal-conditioning module like the TTP223
-// has, so GPIO5 needs its internal pull-up enabled (INPUT_PULLUP) and the
-// logic is active-LOW: the pin reads HIGH when released (pulled up) and
-// LOW when pressed (switch closes the circuit to GND).
-//
-// Dipakai sebagai Touch Signal (marker sedang menyentuh papan), BUKAN AI
-// Trigger -- kirim "1" saat ditekan (mulai menggambar) dan "0" saat
-// dilepas (berhenti menggambar), ke server/hal/providers.py's
-// WifiTouchProvider, yang membaca status ini via is_touching(). Beda
-// dengan AI Trigger (GLOSSARY.md), yang merupakan aksi sekali-tekan
-// terpisah untuk memicu analisis gambar -- bukan tombol ini.
-#define TOUCH_PIN 5
+// ====== KONFIGURASI HARDWARE ======
+#define SWITCH_PIN 18  // Pin Microswitch (COM ke GND, NO ke GPIO 18)
+#define LED_PIN    2   // LED Indikator Onboard
 
-WiFiClient client;
-bool lastState = false;  // false = released, true = pressed
-
-void connectToServer();  // forward declaration -- defined below, but called from setup() above it
+bool lastState = false; // Menyimpan status sakelar sebelumnya
 
 void setup() {
   Serial.begin(115200);
-  pinMode(TOUCH_PIN, INPUT_PULLUP);
 
-  // Sambung ke WiFi
-  Serial.print("Menghubungkan ke WiFi...");
-  WiFi.begin(ssid, password);
-  while (WiFi.status() != WL_CONNECTED) {
-    delay(500);
-    Serial.print(".");
-  }
-  Serial.println("\nWiFi terhubung!");
-  Serial.print("IP ESP32: ");
-  Serial.println(WiFi.localIP());
+  // 1. Inisialisasi Pin Microswitch & LED
+  pinMode(SWITCH_PIN, INPUT_PULLUP);
+  pinMode(LED_PIN, OUTPUT);
+  digitalWrite(LED_PIN, LOW);
 
-  // Sambung ke server laptop
-  connectToServer();
-}
-
-void connectToServer() {
-  Serial.print("Menghubungkan ke server laptop...");
-  if (client.connect(serverIP, serverPort)) {
-    Serial.println("Terhubung!");
-  } else {
-    Serial.println("Gagal. Coba lagi nanti.");
-  }
+  // 2. Inisialisasi Bluetooth dengan nama "SpidolPintar_BT"
+  SerialBT.begin("SpidolPintar_BT"); 
+  Serial.println("\nBluetooth Siap! Silakan pair dengan nama 'SpidolPintar_BT'.");
 }
 
 void loop() {
-  // Jika koneksi terputus, coba sambung ulang
-  if (!client.connected()) {
-    connectToServer();
-    delay(1000);
-    return;
-  }
+  // 1. Membaca status Microswitch (LOW saat tertekan/tersambung ke GND)
+  int switchState = digitalRead(SWITCH_PIN);
+  
+  // Ubah logika: true saat sakelar ditekan ke tembok (LOW)
+  bool currentState = (switchState == LOW);
 
-  // Baca microswitch -- active-LOW (lihat catatan INPUT_PULLUP di atas),
-  // jadi dibalik di sini supaya sisa kode tetap bekerja dengan "true =
-  // ditekan", bukan level sinyal mentahnya.
-  bool currentState = (digitalRead(TOUCH_PIN) == LOW);
-
-  // Kirim hanya saat status berubah (mencegah spam)
+  // 2. Kirim data via Bluetooth HANYA saat ada perubahan status (Edge Detection)
   if (currentState != lastState) {
     if (currentState) {
-      client.println("1");  // Ditekan -> mulai menggambar
-      Serial.println("DITEKAN -> MENGGAMBAR");
+      digitalWrite(LED_PIN, HIGH);   // Nyalakan LED Indikator
+      SerialBT.println("1");         // Kirim "1" via Bluetooth
+      Serial.println("1 -> MENYENTUH TEMBOK (Kirim '1' via BT)");
     } else {
-      client.println("0");  // Dilepas -> berhenti menggambar
-      Serial.println("DILEPAS -> BERHENTI");
+      digitalWrite(LED_PIN, LOW);    // Matikan LED Indikator
+      SerialBT.println("0");         // Kirim "0" via Bluetooth
+      Serial.println("0 -> DI UDARA (Kirim '0' via BT)");
     }
-    lastState = currentState;
+    lastState = currentState; // Simpan status terbaru
   }
 
-  delay(20); // Debounce kecil
+  delay(20); // Delay debounce sederhana
 }

@@ -18,7 +18,7 @@ export function ToolIsland({ tool, onSelectTool }) {
     <div
       role="toolbar"
       aria-label="Drawing tools"
-      className="absolute top-4 left-1/2 z-10 flex -translate-x-1/2 gap-0.5 rounded-2xl border border-chrome-border bg-chrome-bg p-1.5 shadow-[0_8px_24px_rgba(0,0,0,0.45)] backdrop-blur-md"
+      className="absolute top-4 left-1/2 z-10 flex -translate-x-[65%] gap-0.5 rounded-2xl border border-chrome-border bg-chrome-bg p-1.5 shadow-[0_8px_24px_rgba(0,0,0,0.45)] backdrop-blur-md"
     >
       {TOOLS.map(({ id, label, Icon }) => (
         <button

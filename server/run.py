@@ -13,6 +13,11 @@ Usage:
                                     # wire up the ESP32 AI Trigger button,
                                     # without needing a separate preset
                                     # for every combination.
+
+Before using a "-ble" preset, set BLE_ADDRESS below to the Stylus's real
+MAC address (the firmware prints its own on every boot). Before using the
+"-serial" preset, set SERIAL_TOUCH_PORT below to the COM port Windows
+assigned after pairing "SpidolPintar_BT".
 """
 import subprocess
 import sys
@@ -22,6 +27,21 @@ IP_WEBCAM_URL = "http://127.0.0.1:8081/video"
 # (whatsapp-bridge.exe) on this machine, which silently binds to
 # 127.0.0.1 only and would make asyncio.start_server fail to bind at all.
 WIFI_TOUCH_PORT = "8090"
+
+# MAC address of the SPIDOL Stylus's BLE radio -- placeholder, replace
+# with the real one. The firmware (spidol/src/main.cpp) prints it over
+# Serial on every boot ("MAC address (pakai ini untuk --ble-address)"),
+# or discover it with bleak's `BleakScanner.discover()` filtering by
+# device name "SPIDOL_Stylus".
+BLE_ADDRESS = "AA:BB:CC:DD:EE:FF"
+
+# COM port for the classic Bluetooth SPP firmware variant
+# (spidol/src/main.cpp's BluetoothSerial-based firmware, advertised as
+# "SpidolPintar_BT") -- placeholder, replace with the real one. Pair the
+# device in Windows' Bluetooth settings first, then check Device
+# Manager's Ports (COM & LPT) section for the "Standard Serial over
+# Bluetooth link" entry it creates (use the "Outgoing" one).
+SERIAL_TOUCH_PORT = "COM9"
 
 PRESETS = {
     "dev": [
@@ -56,6 +76,38 @@ PRESETS = {
         "--debug-camera",
         "--control-os-cursor",
         "--wifi-touch-port", WIFI_TOUCH_PORT,
+    ],
+    # BLE variants -- same as their WiFi/TCP counterparts above, but the
+    # Stylus connects over Bluetooth instead of WiFi (--ble-address wins
+    # over --wifi-touch-port if both were ever given, so these are just
+    # the clean/intentional way to pick BLE, not a hidden fallback).
+    "pc-camera-ble": [
+        "--dev",
+        "--tracker", "optical-color",
+        "--debug-camera",
+        "--flip-camera",
+        "--control-os-cursor",
+        "--ble-address", BLE_ADDRESS,
+    ],
+    "adjust-region-ble": [
+        "--dev",
+        "--tracker", "optical-color",
+        "--camera-url", IP_WEBCAM_URL,
+        "--adjust-tracking-region",
+        "--debug-camera",
+        "--control-os-cursor",
+        "--ble-address", BLE_ADDRESS,
+    ],
+    # Classic Bluetooth SPP variant -- same idea as the BLE presets above,
+    # but for spidol/src/main.cpp's BluetoothSerial-based firmware
+    # ("SpidolPintar_BT"), read back as a plain COM port.
+    "pc-camera-serial": [
+        "--dev",
+        "--tracker", "optical-color",
+        "--debug-camera",
+        "--flip-camera",
+        "--control-os-cursor",
+        "--serial-touch-port", SERIAL_TOUCH_PORT,
     ],
 }
 

@@ -24,12 +24,18 @@ class _FakeBleakClient:
     """Stands in for `bleak.BleakClient`: records `start_notify` callbacks
     by characteristic UUID instead of talking to a real GATT server, and
     makes `connect`/`disconnect` no-ops so tests never touch a radio.
+
+    `missing_char_uuids` simulates a peripheral that never created a given
+    characteristic at all (e.g. the real Stylus's current touch-only
+    firmware, which has no AI Trigger characteristic) -- `start_notify`
+    raises for those, same as bleak would against real hardware.
     """
 
-    def __init__(self, device_address):
+    def __init__(self, device_address, missing_char_uuids=()):
         self.device_address = device_address
         self.is_connected = False
         self._notify_callbacks = {}
+        self._missing_char_uuids = set(missing_char_uuids)
 
     async def connect(self):
         self.is_connected = True
@@ -38,17 +44,19 @@ class _FakeBleakClient:
         self.is_connected = False
 
     async def start_notify(self, char_uuid, callback):
+        if char_uuid in self._missing_char_uuids:
+            raise Exception(f"characteristic not found: {char_uuid}")
         self._notify_callbacks[char_uuid] = callback
 
     def simulate_notify(self, char_uuid, data: bytes):
         self._notify_callbacks[char_uuid](None, bytearray(data))
 
 
-def _make_provider(on_ai_trigger=None):
+def _make_provider(on_ai_trigger=None, missing_char_uuids=()):
     fake_clients = []
 
     def client_factory(device_address):
-        client = _FakeBleakClient(device_address)
+        client = _FakeBleakClient(device_address, missing_char_uuids=missing_char_uuids)
         fake_clients.append(client)
         return client
 
@@ -125,6 +133,21 @@ async def test_ble_touch_provider_touch_notification_does_not_fire_ai_trigger():
     fake_clients[0].simulate_notify(TOUCH_CHAR_UUID, b"\x01")
 
     assert calls == []
+
+
+@pytest.mark.asyncio
+async def test_connect_still_works_when_the_peripheral_has_no_ai_trigger_characteristic():
+    # The real Stylus's current firmware (spidol/src/main.cpp) only has
+    # the Tip Contact Switch wired up -- no AI Trigger body button exists
+    # yet, so it never creates that GATT characteristic at all. connect()
+    # must not blow up subscribing to a characteristic that simply isn't
+    # there; Touch Signal has to keep working regardless.
+    provider, fake_clients = _make_provider(missing_char_uuids=[AI_TRIGGER_CHAR_UUID])
+
+    await provider.connect()
+    fake_clients[0].simulate_notify(TOUCH_CHAR_UUID, b"\x01")
+
+    assert provider.is_touching() is True
 
 
 def test_ble_touch_provider_with_no_on_ai_trigger_callback_does_not_raise():

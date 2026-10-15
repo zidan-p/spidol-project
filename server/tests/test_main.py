@@ -17,7 +17,13 @@ from main import (
 )
 from hal.os_cursor_controller import OsCursorController
 from hal.image_source import BrowserCanvasImageSource, CameraImageSource, HttpCameraImageSource
-from hal.providers import BleTouchProvider, CompositeTouchProvider, KeyboardMockProvider, WifiTouchProvider
+from hal.providers import (
+    BleTouchProvider,
+    CompositeTouchProvider,
+    KeyboardMockProvider,
+    SerialTouchProvider,
+    WifiTouchProvider,
+)
 from hal.mouse_fallback_tracker import MouseFallbackPositionTracker
 from hal.smoothing_tracker import SmoothingPositionTracker
 from hal.trackers import OpticalColorTracker, SystemMouseFallbackTracker
@@ -107,6 +113,28 @@ def test_make_touch_provider_prefers_ble_address_over_wifi_touch_port_if_both_gi
     args = parse_args(["--ble-address", "AA:BB:CC:DD:EE:FF", "--wifi-touch-port", "8080"])
     provider = make_touch_provider(args)
     assert isinstance(provider, BleTouchProvider)
+
+
+def test_parse_args_defaults_serial_touch_port_to_none():
+    args = parse_args([])
+    assert args.serial_touch_port is None
+
+
+def test_parse_args_recognizes_serial_touch_port_flag():
+    args = parse_args(["--serial-touch-port", "COM9"])
+    assert args.serial_touch_port == "COM9"
+
+
+def test_make_touch_provider_returns_serial_touch_provider_when_serial_touch_port_given():
+    args = parse_args(["--serial-touch-port", "COM9"])
+    provider = make_touch_provider(args)
+    assert isinstance(provider, SerialTouchProvider)
+
+
+def test_make_touch_provider_prefers_wifi_touch_port_over_serial_touch_port_if_both_given():
+    args = parse_args(["--wifi-touch-port", "8080", "--serial-touch-port", "COM9"])
+    provider = make_touch_provider(args)
+    assert isinstance(provider, WifiTouchProvider)
 
 
 def test_parse_args_defaults_tracker_to_mouse():

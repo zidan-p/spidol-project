@@ -12,10 +12,17 @@ Papan tulis interaktif berbiaya rendah. SPIDOL mengubah papan tulis dan proyekto
 
 <p align="center"><em>Contoh: integral tentu ditulis tangan di kanvas, lalu <b>Analyze drawing</b> menampilkan grafiknya lengkap dengan area berarsir dan nilai integral (6,17), serta slider untuk menelusuri kurva.</em></p>
 
-<!-- TODO gambar: foto/GIF penggunaan nyata di whiteboard dengan proyektor menyala (opsional, melengkapi tangkapan layar di atas). -->
+### Demonstrasi goresan
+
+<p align="center">
+  <img src="./docs/assets/demo-stroke.webp" alt="Demonstrasi goresan: spidol dengan ujung berwarna digerakkan di depan layar, dan garis digital tergambar di kanvas mengikuti ujung spidol" width="70%">
+</p>
+
+<p align="center"><em>Menulis langsung dengan spidol SPIDOL: posisi ujung spidol menjadi kursor dan sentuhan menjadi klik, sehingga garis tergambar di kanvas tepat di bawah ujung spidol.</em></p>
 
 ## Daftar Isi
 
+- [Demonstrasi goresan](#demonstrasi-goresan)
 - [Apa yang Dilakukan SPIDOL](#apa-yang-dilakukan-spidol)
   - [Cara kerja](#cara-kerja)
 - [Struktur Repositori](#struktur-repositori)

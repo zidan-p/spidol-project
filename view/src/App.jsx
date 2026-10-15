@@ -172,7 +172,7 @@ function App() {
               Analyzing your drawing…
             </div>
           )}
-          <div className="absolute bottom-4 left-4 z-10 flex gap-1.5 rounded-2xl border border-chrome-border bg-chrome-bg p-1.5 shadow-[0_8px_24px_rgba(0,0,0,0.45)] backdrop-blur-md">
+          <div className="absolute top-4 right-4 z-10 flex gap-1.5 rounded-2xl border border-chrome-border bg-chrome-bg p-1.5 shadow-[0_8px_24px_rgba(0,0,0,0.45)] backdrop-blur-md">
             <button type="button" onClick={handleUndo} disabled={!history.canUndo} className={HUD_BUTTON_CLASS}>
               <Undo2 size={16} aria-hidden="true" />
               Undo

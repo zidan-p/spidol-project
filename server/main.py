@@ -47,6 +47,15 @@ terminated "1"/"0" lines on each switch transition) and the AI Trigger (a
 the BLE path above, just before starting its `run_forever()` background
 task.
 
+Serial mode (`--serial-touch-port <COM port>`): `make_touch_provider` returns
+a `SerialTouchProvider` instead, for the classic Bluetooth SPP firmware
+variant (`spidol/src/main.cpp`'s `BluetoothSerial`-based firmware,
+advertised as "SpidolPintar_BT") -- after pairing it in Windows' Bluetooth
+settings, it shows up as a plain virtual COM port, over which the firmware
+sends the same newline-terminated "1"/"0" lines as the WiFi/TCP variant.
+Same `set_on_ai_trigger(server.fire_ai_trigger)` + `run_forever()` wiring as
+the other two hardware variants.
+
 Adjustable Tracking Region (`--adjust-tracking-region`, docs/specs/0002-
 adjustable-tracking-region.md): with `--tracker=optical-color`, `run()` pops
 up `vision/region_picker.py`'s live preview window *before* constructing the
@@ -73,7 +82,13 @@ from hal.hardware_click_bridge import HardwareClickBridgeTouchProvider
 from hal.image_source import BrowserCanvasImageSource, CameraImageSource, HttpCameraImageSource
 from hal.mouse_fallback_tracker import MouseFallbackPositionTracker
 from hal.os_cursor_controller import OsCursorController
-from hal.providers import BleTouchProvider, CompositeTouchProvider, KeyboardMockProvider, WifiTouchProvider
+from hal.providers import (
+    BleTouchProvider,
+    CompositeTouchProvider,
+    KeyboardMockProvider,
+    SerialTouchProvider,
+    WifiTouchProvider,
+)
 from hal.smoothing_tracker import SmoothingPositionTracker
 from hal.trackers import OpticalColorTracker, SystemMouseFallbackTracker, detect_screen_size
 from server_app import create_server
@@ -222,6 +237,20 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         ),
     )
     parser.add_argument(
+        "--serial-touch-port",
+        default=None,
+        help=(
+            "Read Touch Signal from this COM port (e.g. 'COM8') for the classic "
+            "Bluetooth SPP Stylus firmware variant (spidol/src/main.cpp's "
+            "BluetoothSerial-based firmware, advertised as 'SpidolPintar_BT') -- "
+            "pair that device in Windows' Bluetooth settings first, then check "
+            "Device Manager's Ports (COM & LPT) section for the 'Standard Serial "
+            "over Bluetooth link' entry it creates (use the 'Outgoing' one). "
+            "Mutually exclusive with --ble-address and --wifi-touch-port (in "
+            "that priority order, if more than one is given)."
+        ),
+    )
+    parser.add_argument(
         "--ai-base-url",
         default=None,
         help=(
@@ -256,10 +285,11 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
 def make_touch_provider(args: argparse.Namespace):
     """Picks the touch-signal source: the real Stylus over BLE if
     `--ble-address` was given, the WiFi/TCP firmware variant if
-    `--wifi-touch-port` was given, else the v1 mouse-click stand-in.
-    `on_ai_trigger` is deliberately left unset here -- see `run()`, which
-    wires it to `server.fire_ai_trigger` once the server exists, for both
-    the BLE and WiFi/TCP variants.
+    `--wifi-touch-port` was given, the classic Bluetooth SPP firmware
+    variant if `--serial-touch-port` was given, else the v1 mouse-click
+    stand-in. `on_ai_trigger` is deliberately left unset here -- see
+    `run()`, which wires it to `server.fire_ai_trigger` once the server
+    exists, for the BLE, WiFi/TCP, and Serial variants alike.
     """
     if args.ble_address:
         return BleTouchProvider(
@@ -269,6 +299,8 @@ def make_touch_provider(args: argparse.Namespace):
         )
     if args.wifi_touch_port:
         return WifiTouchProvider(port=args.wifi_touch_port)
+    if args.serial_touch_port:
+        return SerialTouchProvider(port=args.serial_touch_port)
     return KeyboardMockProvider()
 
 
@@ -557,6 +589,14 @@ async def run(args: argparse.Namespace) -> None:
             hardware_touch_provider.set_on_ai_trigger(server.fire_ai_trigger)
             asyncio.create_task(hardware_touch_provider.run_forever())
             print(f"Listening for SPIDOL Stylus (WiFi) on TCP port {args.wifi_touch_port}...")
+        elif isinstance(hardware_touch_provider, SerialTouchProvider):
+            # Same direct-call wiring as the BLE/WiFi paths above -- the
+            # classic Bluetooth SPP firmware variant also sends a
+            # "TRIGGER" line over the same serial connection (see
+            # hal/providers.py), not just touch signal.
+            hardware_touch_provider.set_on_ai_trigger(server.fire_ai_trigger)
+            asyncio.create_task(hardware_touch_provider.run_forever())
+            print(f"Reading SPIDOL Stylus (Bluetooth Serial) on {args.serial_touch_port}...")
 
         await server.wait_closed()
 

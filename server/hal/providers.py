@@ -2,13 +2,15 @@
 
 v1 ships `KeyboardMockProvider` as the mouse-click-based touch stub (this
 ticket binds it to the left mouse button in main.py). `BleTouchProvider`
-(ticket 05, real GATT notify consumer) and `WifiTouchProvider` (the
-WiFi/TCP firmware variant, spidol/spidol_firmware.ino's WiFiClient-based
-main.cpp) slot in here as sibling classes implementing the same
-`BaseTouchProvider` ABC.
+(real GATT notify consumer), `WifiTouchProvider` (the WiFi/TCP firmware
+variant), and `SerialTouchProvider` (the classic Bluetooth SPP firmware
+variant, read back as a plain virtual COM port) slot in here as sibling
+classes implementing the same `BaseTouchProvider` ABC -- one per
+`spidol/src/main.cpp` firmware variant that has existed in this project.
 """
 import asyncio
 import logging
+import threading
 
 from bleak import BleakClient
 
@@ -90,15 +92,32 @@ class BleTouchProvider(BaseTouchProvider):
         self._on_ai_trigger = callback
 
     async def connect(self) -> None:
-        """Connects to the Stylus and subscribes to both GATT
-        characteristics. Must be awaited once (e.g. from an
-        `asyncio.create_task` at server startup -- see research notes
-        section 3) before `is_touching()` reports real hardware state.
+        """Connects to the Stylus and subscribes to the touch
+        characteristic, plus the AI Trigger characteristic if the
+        connected firmware actually has one. Must be awaited once (e.g.
+        from an `asyncio.create_task` at server startup -- see research
+        notes section 3) before `is_touching()` reports real hardware
+        state.
+
+        The current Stylus hardware only has the Tip Contact Switch
+        wired up -- no AI Trigger body button exists yet -- so
+        `spidol/src/main.cpp` doesn't create that characteristic at all.
+        Subscribing to a characteristic the peripheral never created
+        raises; that failure is swallowed here so a touch-only Stylus
+        still works end-to-end, it just never fires AI Trigger. A future
+        firmware revision that does wire up the body button needs no
+        server-side change at all -- the subscribe just stops failing.
         """
         self._client = self._client_factory(self._device_address)
         await self._client.connect()
         await self._client.start_notify(self._touch_char_uuid, self._on_touch_notify)
-        await self._client.start_notify(self._ai_trigger_char_uuid, self._on_ai_trigger_notify)
+        try:
+            await self._client.start_notify(self._ai_trigger_char_uuid, self._on_ai_trigger_notify)
+        except Exception:
+            logger.info(
+                "BleTouchProvider: no AI Trigger characteristic on this Stylus "
+                "(touch-only firmware) -- Touch Signal still works."
+            )
 
     async def disconnect(self) -> None:
         if self._client is not None:
@@ -224,8 +243,10 @@ class WifiTouchProvider(BaseTouchProvider):
                 value = line.strip()
                 if value == b"1":
                     self._touching = True
+                    print("ADA SINYAL -> Stylus menyentuh papan")
                 elif value == b"0":
                     self._touching = False
+                    print("TIDAK ADA SINYAL -> Stylus lepas dari papan")
                 elif value == b"TRIGGER":
                     self._handle_trigger_line()
         except Exception:
@@ -251,4 +272,133 @@ class WifiTouchProvider(BaseTouchProvider):
             # loop -- a crash here would otherwise tear down the TCP
             # connection (or the whole server) over an AI-trigger-handling
             # bug, which is strictly worse than just logging and continuing.
+            logger.exception("on_ai_trigger callback raised")
+
+
+def _default_serial_factory(port: str, baudrate: int):
+    import serial
+
+    return serial.Serial(port, baudrate, timeout=1)
+
+
+class SerialTouchProvider(BaseTouchProvider):
+    """Touch-signal and AI-Trigger source for the classic Bluetooth SPP
+    firmware variant (spidol/src/main.cpp's `BluetoothSerial`-based
+    firmware, advertised as "SpidolPintar_BT"): after pairing that device
+    in Windows' Bluetooth settings, it shows up as a plain virtual COM
+    port (Device Manager -> Ports (COM & LPT) -> "Standard Serial over
+    Bluetooth link (COMx)", the "Outgoing" one) -- over which the
+    firmware sends the exact same newline-terminated "1"/"0" lines as the
+    WiFi/TCP variant (`WifiTouchProvider`), just over a serial port
+    instead of a TCP socket.
+
+    `pyserial`'s API is blocking, unlike `bleak`/`asyncio.start_server`'s
+    native async I/O -- so the actual read loop runs in a background
+    thread (via `loop.run_in_executor`, started by `run_forever()`)
+    rather than being a native coroutine. `is_touching()` just reads back
+    whatever that thread last wrote, same "callback writes a plain
+    instance variable, no awaiting" bridge pattern as
+    `BleTouchProvider`/`WifiTouchProvider`. `serial_factory` is injected
+    (mirrors `BleTouchProvider`'s `client_factory` seam) so tests never
+    open a real COM port.
+    """
+
+    def __init__(
+        self,
+        port: str,
+        baudrate: int = 115200,
+        on_ai_trigger=None,
+        serial_factory=_default_serial_factory,
+    ):
+        self._port = port
+        self._baudrate = baudrate
+        self._on_ai_trigger = on_ai_trigger
+        self._serial_factory = serial_factory
+        self._touching = False
+        self._loop: asyncio.AbstractEventLoop | None = None
+        # Checked by _read_loop on every readline() timeout -- the only
+        # way to actually stop the background thread, since cancelling
+        # run_forever's own asyncio task has no effect on a thread already
+        # blocked in a background executor (see stop()).
+        self._stop_event = threading.Event()
+
+    def set_on_ai_trigger(self, callback) -> None:
+        """Wires (or re-wires) the AI-trigger callback after construction --
+        same startup-order constraint as `WifiTouchProvider.set_on_ai_trigger`.
+        """
+        self._on_ai_trigger = callback
+
+    def is_touching(self) -> bool:
+        return self._touching
+
+    def stop(self) -> None:
+        """Signals the background read thread to exit at its next
+        `readline()` timeout, instead of blocking forever. Cancelling
+        `run_forever`'s own asyncio task does NOT do this by itself --
+        asyncio cancellation has no effect on a thread already running in
+        a background executor, it only stops *awaiting* it. Needed for a
+        clean shutdown/test teardown rather than leaking a thread that
+        blocks process exit.
+        """
+        self._stop_event.set()
+
+    async def run_forever(self, retry_delay_s: float = 1.0) -> None:
+        """Connects and then reconnects on disconnect, forever -- same
+        shape as `BleTouchProvider.run_forever`/`WifiTouchProvider`'s
+        accept-loop, since a dropped Bluetooth SPP link is just as routine
+        as a BLE or TCP disconnect. Intended to be run as its own
+        `asyncio.create_task` at server startup.
+        """
+        self._loop = asyncio.get_running_loop()
+        while not self._stop_event.is_set():
+            try:
+                await self._loop.run_in_executor(None, self._read_loop)
+            except Exception:
+                logger.exception("SerialTouchProvider: connection error")
+            # A lost connection means the real switch state is no longer
+            # known -- safer to assume released than to keep drawing with
+            # a stale "still touching" forever.
+            self._touching = False
+            await asyncio.sleep(retry_delay_s)
+
+    def _read_loop(self) -> None:
+        # Runs on a background thread (see run_forever) -- blocking I/O
+        # only, nothing here may touch the asyncio event loop directly.
+        connection = self._serial_factory(self._port, self._baudrate)
+        logger.info("SerialTouchProvider: connected to %s", self._port)
+        try:
+            while not self._stop_event.is_set():
+                line = connection.readline()
+                if not line:
+                    continue
+                value = line.strip()
+                if value == b"1":
+                    self._touching = True
+                    print("ADA SINYAL -> Stylus menyentuh papan (Bluetooth Serial)")
+                elif value == b"0":
+                    self._touching = False
+                    print("TIDAK ADA SINYAL -> Stylus lepas dari papan (Bluetooth Serial)")
+                elif value == b"TRIGGER":
+                    self._handle_trigger_line()
+        finally:
+            logger.info("SerialTouchProvider: disconnected from %s", self._port)
+            connection.close()
+
+    def _handle_trigger_line(self) -> None:
+        # Called from the background thread (see _read_loop), NOT the
+        # event loop thread -- unlike BleTouchProvider/WifiTouchProvider,
+        # where the equivalent handler already runs on the event loop
+        # (bleak's callback / asyncio.start_server's read loop both do),
+        # so asyncio.create_task would be unsafe to call directly here.
+        # run_coroutine_threadsafe/call_soon_threadsafe are the
+        # cross-thread-safe equivalents, scheduling onto run_forever's
+        # loop (captured in self._loop) instead of touching it directly.
+        if self._on_ai_trigger is None:
+            return
+        try:
+            if asyncio.iscoroutinefunction(self._on_ai_trigger):
+                asyncio.run_coroutine_threadsafe(self._on_ai_trigger(), self._loop)
+            else:
+                self._loop.call_soon_threadsafe(self._on_ai_trigger)
+        except Exception:
             logger.exception("on_ai_trigger callback raised")

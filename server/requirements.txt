@@ -5,6 +5,7 @@ opencv-python>=4.8.0
 openai>=1.0.0
 pydantic>=2.0.0
 bleak>=0.22.0
+pyserial>=3.5
 python-dotenv>=1.0.0
 pytest>=8.0.0
 pytest-asyncio>=0.23.0
