@@ -40,9 +40,22 @@ Spidol tidak punya tombol tambahan karena seluruh fitur dioperasikan lewat posis
 
 ### Cara kerja
 
-![alt text](docs/assets/flowchart.png)
+![Diagram alur SPIDOL: spidol dan kamera, server Python, kanvas React, model vision](docs/assets/flowchart.png)
 
 Firmware hanya mengirim status sentuh; posisi sepenuhnya berasal dari kamera. Menulis, menggambar, dan menampilkan grafik berjalan lokal di laptop. Internet hanya dipakai saat AI diminta membaca rumus.
+
+**Fitur teknis utama** (penjelasan lengkap, lengkap dengan alasan desain, ada di [`docs/TEKNIS.md`](./docs/TEKNIS.md)):
+
+| Fitur | Cara kerja singkat |
+|---|---|
+| **Pelacakan posisi** | Ambang warna HSV yang disetel dari foto spidol asli, mask poligon area pencarian, kontur terbesar, dan centroid dari image moments. Saturasi minimum dinaikkan untuk menolak false positive dari layar TV ([bagian 2](./docs/TEKNIS.md#2-pelacakan-posisi-ujung-spidol)) |
+| **Anti-jitter** | *Exponential moving average* (`alpha` 0,3) sebagai decorator; status direset saat pelacakan hilang agar tidak ada tarikan ke posisi lama ([bagian 3](./docs/TEKNIS.md#3-peredam-jitter-anti-jitter)) |
+| **Proyeksi frame ke layar** | Empat sudut area yang diseret pada tayangan kamera menjadi korespondensi homography (`cv2.findHomography`) ke sudut layar, sehingga kamera boleh miring dan layar boleh trapesium ([bagian 4](./docs/TEKNIS.md#4-proyeksi-frame-kamera-ke-layar)) |
+| **Jembatan kehilangan pelacakan** | Celah deteksi di bawah 150 ms (misalnya tertutup tangan) diisi dengan interpolasi linier; celah lebih panjang menjadi pen-up ([bagian 5](./docs/TEKNIS.md#5-penanganan-kehilangan-pelacakan)) |
+| **Sentuh dan kontrol kursor** | Sinyal sentuh kapasitif lewat BLE GATT atau WiFi TCP, diubah menjadi klik kiri OS; posisi spidol menggerakkan kursor sistem ([bagian 6](./docs/TEKNIS.md#6-sinyal-sentuh-dan-kontrol-kursor)) |
+| **Penghalusan garis** | Kurva kuadratik melalui titik tengah untuk goresan bebas; bentuk geometris tetap tegas; undo/redo berbasis gestur ([bagian 8](./docs/TEKNIS.md#8-rendering-goresan)) |
+| **Pipeline AI** | Region goresan dihitung di server, di-crop dengan margin, dikirim ke model vision (kompatibel OpenAI), keluaran divalidasi Pydantic ([bagian 9](./docs/TEKNIS.md#9-pipeline-ai)) |
+| **Mesin grafik** | Evaluasi aman lewat mathjs (tanpa `eval`), kurva eksplisit, integral tentu dengan aturan trapesium, pan/zoom, dan sumbu "rapi" ([bagian 10](./docs/TEKNIS.md#10-mesin-grafik-fungsi)) |
 
 ### Demonstrasi goresan
 
@@ -186,6 +199,7 @@ SPIDOL dirancang untuk kelas yang sudah punya papan tulis dengan proyektor, atau
 
 ## Dokumentasi Lanjutan
 
+- [`docs/TEKNIS.md`](./docs/TEKNIS.md): penjelasan teknis mendalam (pelacakan, anti-jitter, homography, telemetri, rendering, pipeline AI, mesin grafik)
 - [`SPEC.md`](./SPEC.md): spesifikasi teknis dan arsitektur
 - [`GLOSSARY.md`](./GLOSSARY.md): istilah baku proyek
 - [`docs/adr/`](./docs/adr/): catatan keputusan arsitektur beserta alasannya
