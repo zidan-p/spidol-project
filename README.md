@@ -4,13 +4,35 @@
 
 ---
 
-Papan tulis interaktif berbiaya rendah. SPIDOL (*Sistem Pena Interaktif Deteksi Optik & Low-Cost*) mengubah permukaan apa pun yang dapat menampilkan gambar dari laptop, seperti papan tulis dengan proyektor atau TV biasa, menjadi layar interaktif dengan satu spidol yang dimodifikasi. Komponen spidolnya berbiaya di bawah Rp150.000, dibanding Rp30–60 juta untuk smartboard komersial.
+**Papan Tulis Interaktif Berdaya AI yang Benar-Benar Terjangkau dan Mudah Diadakan (*Obtainable*) untuk Ruang Kelas 3T.**
+
+Smartboard komersial seharga Rp30–60 juta per unit sulit diadakan oleh sekolah di daerah 3T dan sekolah negeri berpagu minim. Di sisi lain, solusi pembelajaran digital berbasis aplikasi sering menuntut setiap siswa membawa smartphone atau tablet pribadi ke kelas.
+
+**SPIDOL** (*Sistem Pena Interaktif Deteksi Optik & Low-Cost*) dirancang dengan prinsip keterjangkauan nyata (*obtainability*):
+
+- **Mudah diadakan.** Spidol dimodifikasi dengan komponen elektronik umum yang tersedia di pasaran lokal, dengan total biaya perangkat keras **di bawah Rp150.000**.
+- **Tanpa pengadaan layar baru.** Cukup memanfaatkan papan tulis dan proyektor atau layar (termasuk TV biasa) yang sudah ada di kelas.
+- **Tanpa beban gawai siswa.** Seluruh siswa belajar bersama dari layar yang sama, tanpa diwajibkan membawa smartphone atau laptop.
+- **Irit bandwidth.** Menulis dan melacak spidol berjalan lokal di laptop guru. Internet hanya dibutuhkan sesaat untuk mengirim potongan gambar saat tombol *Analyze drawing* ditekan.
+
+Yang diasumsikan sudah tersedia: satu laptop untuk guru, satu kamera (ponsel atau webcam), serta papan tulis dan proyektor atau layar.
+
+Dengan kemudahan pengadaan ini, papan interaktif berbasis AI berpeluang dihadirkan untuk banyak siswa di sekolah pelosok yang selama ini belum terjangkau smartboard.
 
 <p align="center">
   <img src="./docs/assets/preview-ui.png" alt="Tampilan SPIDOL: integral tentu ditulis tangan di kanvas, dilingkari, lalu AI menampilkan grafik fungsi dengan area berarsir dan nilai integralnya" width="100%">
 </p>
 
 <p align="center"><em>Contoh: integral tentu ditulis tangan di kanvas, lalu <b>Analyze drawing</b> menampilkan grafiknya lengkap dengan area berarsir dan nilai integral (6,17), serta slider untuk menelusuri kurva.</em></p>
+
+### Mengapa SPIDOL Lebih Mudah Diadakan di Kelas 3T?
+
+| Aspek pengadaan | Smartboard komersial / aplikasi web | **Pendekatan SPIDOL** |
+|---|---|---|
+| **Biaya perangkat** | Rp30.000.000 – Rp60.000.000 per unit. | **Di bawah Rp150.000** (komponen elektronik umum di pasaran lokal). |
+| **Kebutuhan gawai siswa** | Aplikasi umumnya menuntut tiap siswa memiliki smartphone atau tablet. | **Nol perangkat di sisi siswa:** satu spidol untuk satu ruang kelas. |
+| **Pemanfaatan sarana kelas** | Harus membeli dan memasang papan atau layar baru. | **Memakai fasilitas yang ada:** papan tulis dan proyektor atau layar yang sudah tersedia. |
+| **Kebutuhan bandwidth** | Streaming video atau aplikasi web umumnya boros kuota. | **Local-first dan AI on-demand:** kanvas berjalan lokal; internet hanya dipakai saat memanggil AI untuk membaca rumus. |
 
 ## Daftar Isi
 
@@ -189,12 +211,14 @@ cd view && pnpm test           # tes frontend
 SPIDOL dirancang untuk kelas yang sudah punya papan tulis dengan proyektor, atau TV, tetapi tidak punya smartboard: pelajar SD–SMA di daerah 3T yang terkendala akses perangkat digital dan internet, dan membutuhkan pembelajaran luring serta materi yang terjangkau. Idenya bukan menambah perangkat baru ke kelas, melainkan membuat perangkat yang sudah ada mampu berbuat lebih banyak.
 
 - **Terjangkau.** Komponen spidol di bawah Rp150.000, dibanding Rp30–60 juta untuk smartboard komersial. Layar yang sudah ada (proyektor, TV biasa, atau monitor yang bisa tersambung ke laptop) dan kamera (ponsel atau webcam) tetap dipakai, tanpa membeli smartboard atau smart TV.
-- **Berjalan luring.** Menulis, menggambar, dan menampilkan grafik berlangsung sepenuhnya di laptop. Internet dan kunci API hanya dibutuhkan saat AI diminta membaca rumus lewat *Analyze drawing*.
+- **Local-first, berjalan luring.** Menulis, menggambar, melacak spidol, dan menghitung kurva berlangsung sepenuhnya di laptop. Internet dan kunci API hanya dibutuhkan saat AI diminta membaca rumus lewat *Analyze drawing*; bila koneksi terputus, jawaban cadangan (*Cached Fallback Schema*) ditampilkan.
 - **Satu perangkat untuk satu kelas.** Siswa tidak membutuhkan gawai masing-masing; seluruh kelas belajar dari layar yang sama.
 - **Materi dibuat di tempat.** Guru menulis rumus dengan tulisan tangannya sendiri, dan grafik langsung muncul. Tidak perlu menyiapkan slide atau membagikan berkas materi sebelumnya.
 - **Konsep abstrak menjadi terlihat.** Parameter fungsi dapat digeser langsung di papan, sehingga siswa melihat sendiri bagaimana perubahan nilai mengubah bentuk kurva.
 - **Mudah dipasang.** Tidak ada instalasi permanen pada papan; cukup pasang kamera, atur empat sudut area proyeksi satu kali per sesi, dan mulai menulis.
 - **Kendali tetap di tangan guru.** AI hanya bekerja saat tombol *Analyze drawing* diklik, dan grafik tampil di samping tulisan aslinya sehingga mudah dicocokkan.
+- **Inklusivitas kinestetik dan visual (merangkul siswa yang tertinggal).** Siswa yang kesulitan memahami sains dan matematika sering terhambat karena rumus diajarkan secara abstrak dan kaku. SPIDOL dirancang agar konsep abstrak menjadi konkret dan bisa dijamah secara fisik: siswa diajak maju ke depan kelas, menyentuh dan menggeser slider kurva langsung di layar, dan mengamati hubungan sebab-akibat dari perubahan parameter rumus secara visual dan real-time.
+- **Efisiensi kuota data untuk sekolah pelosok.** Berbeda dengan aplikasi video atau streaming kelas yang memakan kuota besar, SPIDOL memproses seluruh coretan dan kalkulasi kurva secara lokal di laptop. Koneksi internet hanya dibutuhkan sesaat untuk mengirim potongan gambar rumus saat tombol *Analyze drawing* ditekan (on-demand), sehingga hemat bandwidth.
 - **Mudah dikembangkan.** Firmware, server, dan antarmuka dipisahkan; penyedia AI dapat diganti; dan fondasi simulasi fisika sudah disiapkan untuk pengembangan berikutnya.
 
 ## Dokumentasi Lanjutan
