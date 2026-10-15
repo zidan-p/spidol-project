@@ -2,9 +2,9 @@
   <img src="./docs/assets/banner-spidol.png" alt="SPIDOL" width="100%">
 </p>
 
-# SPIDOL
+---
 
-Papan tulis interaktif berbiaya rendah. SPIDOL (*Sistem Pena Interaktif Deteksi Optik & Low-Cost*) mengubah papan tulis dan proyektor kelas biasa menjadi papan tulis interaktif dengan satu spidol yang dimodifikasi. Komponen spidolnya berbiaya di bawah Rp150.000, dibanding Rp30–60 juta untuk smartboard komersial.
+Papan tulis interaktif berbiaya rendah. SPIDOL (*Sistem Pena Interaktif Deteksi Optik & Low-Cost*) mengubah permukaan apa pun yang dapat menampilkan gambar dari laptop, seperti papan tulis dengan proyektor atau TV biasa, menjadi layar interaktif dengan satu spidol yang dimodifikasi. Komponen spidolnya berbiaya di bawah Rp150.000, dibanding Rp30–60 juta untuk smartboard komersial.
 
 <p align="center">
   <img src="./docs/assets/preview-ui.png" alt="Tampilan SPIDOL: integral tentu ditulis tangan di kanvas, dilingkari, lalu AI menampilkan grafik fungsi dengan area berarsir dan nilai integralnya" width="100%">
@@ -21,7 +21,7 @@ Papan tulis interaktif berbiaya rendah. SPIDOL (*Sistem Pena Interaktif Deteksi 
 - [Daftar Komponen (BOM)](#daftar-komponen-bom)
 - [Cara Menjalankan](#cara-menjalankan)
   - [1. Coba tanpa perangkat keras](#1-coba-tanpa-perangkat-keras-mouse-menggantikan-spidol)
-  - [2. Aktifkan AI (opsional)](#2-aktifkan-ai-opsional)
+  - [2. Siapkan kunci API AI](#2-siapkan-kunci-api-ai-diperlukan-untuk-analyze-drawing)
   - [3. Dengan kamera dan spidol fisik](#3-dengan-kamera-dan-spidol-fisik)
   - [4. Mode produksi](#4-mode-produksi-demonstrasi)
   - [5. Mengunggah firmware ke ESP32](#5-mengunggah-firmware-ke-esp32)
@@ -33,7 +33,7 @@ Papan tulis interaktif berbiaya rendah. SPIDOL (*Sistem Pena Interaktif Deteksi 
 ## Apa yang Dilakukan SPIDOL
 
 1. **Spidol menjadi mouse di papan tulis.** Kamera melacak ujung spidol yang berwarna mencolok, dan posisinya menjadi posisi kursor. Sensor sentuh kapasitif di ujung spidol mendeteksi saat spidol menempel ke papan, dan sentuhan itu menjadi klik kiri.
-2. **Tulisan langsung menjadi garis digital.** Kanvas web menggambar garis tepat di bawah ujung spidol dan diproyeksikan kembali ke papan. Tersedia pilihan warna, ketebalan garis, undo/redo, dan Kiosk Mode untuk presentasi.
+2. **Tulisan langsung menjadi garis digital.** Kanvas web menggambar garis tepat di bawah ujung spidol dan ditampilkan kembali lewat proyektor atau layar yang tersambung ke laptop. Tersedia pilihan warna, ketebalan garis, undo/redo, dan Kiosk Mode untuk presentasi.
 3. **AI membaca rumus dan menampilkan grafiknya.** Setelah menulis rumus, guru mengklik tombol *Analyze drawing* di layar dengan spidol yang sama. Model vision (default: Gemini) membaca tulisan tangan, lalu grafik fungsi yang akurat muncul di samping tulisan, lengkap dengan parameter yang bisa digeser. Mendukung grafik fungsi `y = f(x)`, kurva parametrik (mis. lingkaran), dan integral tentu.
 
 Spidol tidak punya tombol tambahan karena seluruh fitur dioperasikan lewat posisi dan sentuhan.
@@ -50,7 +50,7 @@ Firmware hanya mengirim status sentuh; posisi sepenuhnya berasal dari kamera. Me
   <img src="./docs/assets/demo-stroke.webp" alt="Demonstrasi goresan: spidol dengan ujung berwarna digerakkan di depan layar, dan garis digital tergambar di kanvas mengikuti ujung spidol" width="70%">
 </p>
 
-<p align="center"><em>Menulis langsung dengan spidol SPIDOL: posisi ujung spidol menjadi kursor dan sentuhan menjadi klik, sehingga garis tergambar di kanvas tepat di bawah ujung spidol.</em></p>
+<p align="center"><em>Menulis langsung dengan spidol SPIDOL: posisi ujung spidol menjadi kursor dan sentuhan menjadi klik, sehingga garis tergambar di kanvas tepat di bawah ujung spidol. Demonstrasi ini memakai TV biasa (bukan smart TV) yang disambungkan ke laptop yang menjalankan server. Karena tampilannya dikirim dari laptop, perangkat apa pun yang dapat menampilkan gambar dari laptop, seperti proyektor, TV, atau monitor, dapat dipakai.</em></p>
 
 <!-- TODO gambar: foto spidol yang dibongkar (sensor kapasitif + ESP32) dan foto rangkaian akhir. -->
 
@@ -80,7 +80,7 @@ Total di bawah Rp150.000 (dua toko resmi di Tokopedia):
 - Baterai Li-ion 18650 + modul charger TP4056
 - Sensor sentuh kapasitif dengan perpanjangan *patch* konduktif (*capacitive patch extension*) di ujung spidol
 
-Rangkaian akhir dirakit tanpa breadboard. Kamera memakai ponsel atau webcam yang sudah dimiliki; proyektor dan papan tulis milik kelas.
+Rangkaian akhir dirakit tanpa breadboard. Kamera memakai ponsel atau webcam yang sudah dimiliki; layar atau proyektor dan permukaannya (papan tulis atau TV) dapat memakai yang sudah ada.
 
 <!-- TODO: lengkapi dengan harga per item dan komponen pendukung lain yang masih dipakai. -->
 
@@ -104,11 +104,11 @@ pnpm install
 pnpm run dev
 ```
 
-Buka `http://localhost:5173`. Klik kiri dan tahan untuk menggambar. Tombol *Analyze drawing* memberi hasil untuk rumus demonstrasi walau kunci API belum diisi.
+Buka `http://localhost:5173`. Klik kiri dan tahan untuk menggambar; fitur ini langsung berfungsi tanpa kunci API. Tombol *Analyze drawing* memerlukan kunci API AI; tanpa kunci hanya muncul peringatan (lihat langkah 2).
 
-### 2. Aktifkan AI (opsional)
+### 2. Siapkan kunci API AI (diperlukan untuk Analyze drawing)
 
-Salin `server/.env.example` menjadi `server/.env`, lalu isi `AI_API_KEY` (Gemini). Untuk penyedia lain yang kompatibel OpenAI (mis. OpenRouter), isi juga `AI_BASE_URL` dan `AI_MODEL`. Jika kunci kosong, pemanggilan gagal, atau melebihi batas waktu (default 3 detik, atur dengan `AI_TIMEOUT_S`), sistem menampilkan jawaban cadangan untuk rumus demonstrasi.
+Fitur *Analyze drawing* membutuhkan kunci API model vision. Salin `server/.env.example` menjadi `server/.env`, lalu isi `AI_API_KEY` (Gemini). Untuk penyedia lain yang kompatibel OpenAI (mis. OpenRouter), isi juga `AI_BASE_URL` dan `AI_MODEL`. Batas waktu panggilan default 3 detik dan dapat diubah dengan `AI_TIMEOUT_S`. Tanpa kunci, *Analyze drawing* hanya menampilkan peringatan (*alert*) dan tidak membaca rumus. Fitur menulis dan menggambar tidak memerlukan kunci ini.
 
 ### 3. Dengan kamera dan spidol fisik
 
@@ -127,7 +127,7 @@ Preset dengan `--control-os-cursor` membuat posisi spidol menggerakkan kursor si
 
 Saat server dijalankan dengan kamera (preset `adjust-region`, atau opsi `--adjust-tracking-region` pada preset lain), dua jendela OpenCV muncul berurutan:
 
-1. **Jendela pemilihan frame** (*SPIDOL - Adjust Tracking Region*). Menampilkan tayangan langsung kamera dengan bingkai empat sudut berwarna kuning. Geser keempat sudutnya hingga pas dengan tepi papan tulis atau area proyeksi. Bingkai ini punya dua fungsi:
+1. **Jendela pemilihan frame** (*SPIDOL - Adjust Tracking Region*). Menampilkan tayangan langsung kamera dengan bingkai empat sudut berwarna kuning. Geser keempat sudutnya hingga pas dengan tepi layar atau area proyeksi. Bingkai ini punya dua fungsi:
    - Pelacak hanya mencari ujung spidol di dalam bingkai, sehingga benda berwarna serupa di luar papan tidak mengganggu.
    - Keempat sudut menjadi batas layar: sudut kiri atas bingkai sama dengan sudut kiri atas layar, dan seterusnya. Dengan begitu posisi ujung spidol di dalam bingkai dipetakan ke posisi kursor mouse Windows (bila `--control-os-cursor` aktif) dan ke kanvas.
 2. **Tekan Enter** (atau Space) untuk mengunci bingkai. Esc mengembalikan keempat sudut ke posisi awal. Menekan Enter tanpa menggeser apa pun, atau menutup jendela tanpa konfirmasi, berarti seluruh frame kamera dipakai.
@@ -173,11 +173,11 @@ cd view && pnpm test           # tes frontend
 
 ## Manfaat
 
-SPIDOL dirancang untuk kelas yang punya papan tulis dan proyektor tetapi tidak punya smartboard: pelajar SD–SMA di daerah 3T yang terkendala akses perangkat digital dan internet, dan membutuhkan pembelajaran luring serta materi yang terjangkau. Idenya bukan menambah perangkat baru ke kelas, melainkan membuat perangkat yang sudah ada mampu berbuat lebih banyak.
+SPIDOL dirancang untuk kelas yang sudah punya papan tulis dengan proyektor, atau TV, tetapi tidak punya smartboard: pelajar SD–SMA di daerah 3T yang terkendala akses perangkat digital dan internet, dan membutuhkan pembelajaran luring serta materi yang terjangkau. Idenya bukan menambah perangkat baru ke kelas, melainkan membuat perangkat yang sudah ada mampu berbuat lebih banyak.
 
-- **Terjangkau.** Komponen spidol di bawah Rp150.000, dibanding Rp30–60 juta untuk smartboard komersial. Papan tulis, proyektor, dan kamera (ponsel atau webcam yang sudah ada) tetap dipakai, tanpa membeli papan atau proyektor baru.
-- **Berjalan luring.** Menulis, menggambar, dan menampilkan grafik berlangsung sepenuhnya di laptop. Internet hanya dibutuhkan saat AI diminta membaca rumus, dan rumus demonstrasi tetap tersedia lewat jawaban cadangan bila koneksi bermasalah.
-- **Satu perangkat untuk satu kelas.** Siswa tidak membutuhkan gawai masing-masing; seluruh kelas belajar dari papan yang sama.
+- **Terjangkau.** Komponen spidol di bawah Rp150.000, dibanding Rp30–60 juta untuk smartboard komersial. Layar yang sudah ada (proyektor, TV biasa, atau monitor yang bisa tersambung ke laptop) dan kamera (ponsel atau webcam) tetap dipakai, tanpa membeli smartboard atau smart TV.
+- **Berjalan luring.** Menulis, menggambar, dan menampilkan grafik berlangsung sepenuhnya di laptop. Internet dan kunci API hanya dibutuhkan saat AI diminta membaca rumus lewat *Analyze drawing*.
+- **Satu perangkat untuk satu kelas.** Siswa tidak membutuhkan gawai masing-masing; seluruh kelas belajar dari layar yang sama.
 - **Materi dibuat di tempat.** Guru menulis rumus dengan tulisan tangannya sendiri, dan grafik langsung muncul. Tidak perlu menyiapkan slide atau membagikan berkas materi sebelumnya.
 - **Konsep abstrak menjadi terlihat.** Parameter fungsi dapat digeser langsung di papan, sehingga siswa melihat sendiri bagaimana perubahan nilai mengubah bentuk kurva.
 - **Mudah dipasang.** Tidak ada instalasi permanen pada papan; cukup pasang kamera, atur empat sudut area proyeksi satu kali per sesi, dan mulai menulis.
