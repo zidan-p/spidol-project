@@ -69,6 +69,7 @@ from pathlib import Path
 from dotenv import load_dotenv
 
 from ai.vision_pipeline import DEFAULT_BASE_URL, DEFAULT_MODEL, LazyOpenAIClient
+from hal.hardware_click_bridge import HardwareClickBridgeTouchProvider
 from hal.image_source import BrowserCanvasImageSource, CameraImageSource, HttpCameraImageSource
 from hal.mouse_fallback_tracker import MouseFallbackPositionTracker
 from hal.os_cursor_controller import OsCursorController
@@ -492,17 +493,22 @@ async def run(args: argparse.Namespace) -> None:
             logger.info("No tracking region selected; searching the full camera frame.")
 
     tracker = make_tracker(args, search_region=search_region)
-    # A real mouse click always drives Touch Signal, regardless of which
-    # hardware provider (if any) is also selected below -- so the board
-    # can always be painted with the mouse, in addition to the ESP
-    # Stylus's own switch, rather than the two being mutually exclusive.
+    # A real mouse click always drives Touch Signal. The ESP Stylus's own
+    # switch (BLE or WiFi) doesn't feed Touch Signal directly -- it's
+    # bridged into a real OS left-click instead (HardwareClickBridge
+    # TouchProvider), picked up by the very same global mouse listener as
+    # a genuine click below. So the board can be painted with the mouse or
+    # the ESP board interchangeably, and the ESP board can also activate
+    # on-screen UI (sliders, buttons) the same way a physical click would,
+    # rather than touch being a separate "paint action" pathway.
     hardware_touch_provider = make_touch_provider(args)
     if isinstance(hardware_touch_provider, KeyboardMockProvider):
         mouse_touch_provider = hardware_touch_provider
         touch_provider = hardware_touch_provider
     else:
         mouse_touch_provider = KeyboardMockProvider()
-        touch_provider = CompositeTouchProvider(hardware_touch_provider, mouse_touch_provider)
+        click_bridge = HardwareClickBridgeTouchProvider(hardware_touch_provider)
+        touch_provider = CompositeTouchProvider(click_bridge, mouse_touch_provider)
 
     vision_client, ai_model = make_vision_client(args)
     ai_timeout_s = make_ai_timeout_s(args)
